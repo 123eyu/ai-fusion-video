@@ -3,7 +3,9 @@ package com.stonewu.fusion.service.storyboard;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import com.stonewu.fusion.common.BusinessException;
-import com.stonewu.fusion.config.SoniloBgmProperties;
+import com.stonewu.fusion.config.EpisodeBgmProperties;
+import com.stonewu.fusion.entity.ai.ApiConfig;
+import com.stonewu.fusion.service.ai.ApiConfigService;
 import com.stonewu.fusion.service.ai.sonilo.SoniloAudioClient;
 import com.stonewu.fusion.service.ai.sonilo.SoniloAudioTrack;
 import com.stonewu.fusion.service.storage.MediaStorageService;
@@ -19,13 +21,17 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
- * 合成后配乐服务（默认关闭）。
+ * 合成后配乐服务。
+ * <p>
+ * 开关与接入全部动态维护：存在启用的、平台为 {@code sonilo} 的 API 配置即开启，
+ * 禁用或删除即关闭；密钥、地址与出站代理都从该配置读取，不进 application.yaml。
  * <p>
  * 在本集视频拼接完成后、持久化之前执行：把成片交给 Sonilo 按画面内容生成配乐
  * （时长与成片自动对齐，无提示词也可用；可选同时生成音效音轨），
@@ -47,9 +53,10 @@ public class EpisodeBgmService {
     private static final int MUX_TIMEOUT_MINUTES = 15;
     private static final int PROBE_TIMEOUT_SECONDS = 30;
 
-    private final SoniloBgmProperties properties;
+    private final EpisodeBgmProperties properties;
     private final SoniloAudioClient soniloAudioClient;
     private final MediaStorageService mediaStorageService;
+    private final ApiConfigService apiConfigService;
 
     @Value("${video.compose.ffmpeg-path:ffmpeg}")
     private String ffmpegPath;
@@ -57,31 +64,48 @@ public class EpisodeBgmService {
     @Value("${video.compose.ffprobe-path:ffprobe}")
     private String ffprobePath;
 
-    public EpisodeBgmService(SoniloBgmProperties properties,
+    public EpisodeBgmService(EpisodeBgmProperties properties,
                              SoniloAudioClient soniloAudioClient,
-                             MediaStorageService mediaStorageService) {
+                             MediaStorageService mediaStorageService,
+                             ApiConfigService apiConfigService) {
         this.properties = properties;
         this.soniloAudioClient = soniloAudioClient;
         this.mediaStorageService = mediaStorageService;
+        this.apiConfigService = apiConfigService;
     }
 
-    public boolean isEnabled() {
-        return properties.isEnabled();
+    /**
+     * 解析当前生效的 Sonilo 接入配置。
+     *
+     * @return 启用的 platform=sonilo API 配置；没有则返回 null，表示本次合成不做配乐。
+     *         同时存在多条时取 id 最小的一条并记录告警。
+     */
+    public ApiConfig resolveApiConfig() {
+        List<ApiConfig> configs = apiConfigService.getListByPlatform(SoniloAudioClient.PLATFORM);
+        if (configs == null || configs.isEmpty()) {
+            return null;
+        }
+        ApiConfig selected = configs.stream()
+                .min(Comparator.comparing(ApiConfig::getId, Comparator.nullsLast(Comparator.naturalOrder())))
+                .orElse(configs.get(0));
+        if (configs.size() > 1) {
+            log.warn("[EpisodeBgm] 存在 {} 条启用的 Sonilo API 配置，本次使用 id={}（{}）",
+                    configs.size(), selected.getId(), selected.getName());
+        }
+        return selected;
     }
 
     /**
      * 对合成完成的成片执行配乐。
      *
+     * @param apiConfig     {@link #resolveApiConfig()} 得到的 Sonilo 接入配置
      * @param composedVideo 拼接完成的本地成片文件
      * @param workDir       本次合成的临时目录（音轨与混音产物都写在这里，随合成流程统一清理）
      * @param progress      进度回调，透传到任务流
      * @return 配乐结果；配乐失败时抛出异常，由调用方决定是否降级
      */
-    public EpisodeBgmOutcome apply(Path composedVideo, Path workDir, Consumer<String> progress) {
-        if (StrUtil.isBlank(properties.getApiKey())) {
-            throw new BusinessException("已开启合成后配乐但未配置 SONILO_API_KEY，"
-                    + "请在 sonilo.com 获取 API Key 后通过环境变量注入");
-        }
+    public EpisodeBgmOutcome apply(ApiConfig apiConfig, Path composedVideo, Path workDir, Consumer<String> progress) {
+        SoniloAudioClient.requireApiKey(apiConfig);
 
         double durationSeconds = probeDurationSeconds(composedVideo);
         String musicSkipReason = musicSkipReason(durationSeconds);
@@ -90,13 +114,13 @@ public class EpisodeBgmService {
         }
 
         progress.accept("配乐生成中：正在上传成片到 Sonilo…");
-        String musicTaskId = soniloAudioClient.submitMusicTask(composedVideo, properties.getMusicPrompt());
+        String musicTaskId = soniloAudioClient.submitMusicTask(apiConfig, composedVideo, properties.getMusicPrompt());
         progress.accept("配乐任务已受理（task_id: " + musicTaskId + "），等待生成…");
-        JSONObject musicTask = soniloAudioClient.awaitTask(musicTaskId);
+        JSONObject musicTask = soniloAudioClient.awaitTask(apiConfig, musicTaskId);
         SoniloAudioTrack musicTrack = soniloAudioClient.extractPrimaryTrack(musicTask, musicTaskId);
 
         Path musicFile = workDir.resolve("bgm_music" + audioExtension(musicTrack.url()));
-        soniloAudioClient.downloadAudio(musicTrack.url(), musicFile);
+        soniloAudioClient.downloadAudio(apiConfig, musicTrack.url(), musicFile);
         String musicStoredUrl = mediaStorageService.storeFile(
                 musicFile, "audio/bgm", trimDot(audioExtension(musicTrack.url())));
 
@@ -108,11 +132,11 @@ public class EpisodeBgmService {
                 // 音效是可选加分项：失败只记录原因，保留已生成的配乐
                 try {
                     progress.accept("音效生成中：已提交 Sonilo 音效任务…");
-                    String sfxTaskId = soniloAudioClient.submitSfxTask(composedVideo, null);
-                    JSONObject sfxTask = soniloAudioClient.awaitTask(sfxTaskId);
+                    String sfxTaskId = soniloAudioClient.submitSfxTask(apiConfig, composedVideo, null);
+                    JSONObject sfxTask = soniloAudioClient.awaitTask(apiConfig, sfxTaskId);
                     SoniloAudioTrack sfxTrack = soniloAudioClient.extractPrimaryTrack(sfxTask, sfxTaskId);
                     sfxFile = workDir.resolve("bgm_sfx" + audioExtension(sfxTrack.url()));
-                    soniloAudioClient.downloadAudio(sfxTrack.url(), sfxFile);
+                    soniloAudioClient.downloadAudio(apiConfig, sfxTrack.url(), sfxFile);
                     sfxStoredUrl = mediaStorageService.storeFile(
                             sfxFile, "audio/bgm", trimDot(audioExtension(sfxTrack.url())));
                     sfxLicenseId = sfxTrack.licenseId();

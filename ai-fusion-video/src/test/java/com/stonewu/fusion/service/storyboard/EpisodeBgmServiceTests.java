@@ -1,6 +1,8 @@
 package com.stonewu.fusion.service.storyboard;
 
-import com.stonewu.fusion.config.SoniloBgmProperties;
+import com.stonewu.fusion.config.EpisodeBgmProperties;
+import com.stonewu.fusion.entity.ai.ApiConfig;
+import com.stonewu.fusion.service.ai.ApiConfigService;
 import com.stonewu.fusion.service.ai.sonilo.SoniloAudioClient;
 import com.stonewu.fusion.service.storage.MediaStorageService;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,6 +17,7 @@ import java.nio.file.Paths;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class EpisodeBgmServiceTests {
@@ -25,7 +28,10 @@ class EpisodeBgmServiceTests {
     @Mock
     private MediaStorageService mediaStorageService;
 
-    private SoniloBgmProperties properties;
+    @Mock
+    private ApiConfigService apiConfigService;
+
+    private EpisodeBgmProperties properties;
     private EpisodeBgmService episodeBgmService;
 
     private final Path video = Paths.get("/tmp/output.mp4");
@@ -35,16 +41,35 @@ class EpisodeBgmServiceTests {
 
     @BeforeEach
     void setUp() {
-        properties = new SoniloBgmProperties();
+        properties = new EpisodeBgmProperties();
         properties.setMusicVolume(0.7);
-        episodeBgmService = new EpisodeBgmService(properties, soniloAudioClient, mediaStorageService);
+        episodeBgmService = new EpisodeBgmService(properties, soniloAudioClient, mediaStorageService, apiConfigService);
         ReflectionTestUtils.setField(episodeBgmService, "ffmpegPath", "ffmpeg");
         ReflectionTestUtils.setField(episodeBgmService, "ffprobePath", "ffprobe");
     }
 
     @Test
-    void disabledByDefault() {
-        assertThat(episodeBgmService.isEnabled()).isFalse();
+    void resolveApiConfigReturnsNullWithoutEnabledSoniloConfig() {
+        when(apiConfigService.getListByPlatform("sonilo")).thenReturn(List.of());
+
+        assertThat(episodeBgmService.resolveApiConfig()).isNull();
+    }
+
+    @Test
+    void resolveApiConfigReturnsTheEnabledSoniloConfig() {
+        ApiConfig config = ApiConfig.builder().id(5L).name("Sonilo").platform("sonilo").apiKey("sk-1").build();
+        when(apiConfigService.getListByPlatform("sonilo")).thenReturn(List.of(config));
+
+        assertThat(episodeBgmService.resolveApiConfig()).isSameAs(config);
+    }
+
+    @Test
+    void resolveApiConfigPicksLowestIdWhenSeveralEnabled() {
+        ApiConfig newer = ApiConfig.builder().id(7L).name("Sonilo B").platform("sonilo").apiKey("sk-b").build();
+        ApiConfig older = ApiConfig.builder().id(3L).name("Sonilo A").platform("sonilo").apiKey("sk-a").build();
+        when(apiConfigService.getListByPlatform("sonilo")).thenReturn(List.of(newer, older));
+
+        assertThat(episodeBgmService.resolveApiConfig()).isSameAs(older);
     }
 
     @Test

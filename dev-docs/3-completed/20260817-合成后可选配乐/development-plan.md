@@ -10,10 +10,11 @@
 2. 新增合成后配乐服务：本地时长预检（配乐上限 6 分钟、音效上限 3 分钟）、音轨下载与持久化、ffmpeg 混音（视频流零转码）。
 3. `VideoComposeService` 在拼接成功后、持久化前挂入配乐步骤；配乐失败或跳过均不影响本集合成结果，原因写入任务流与分镜集。
 4. 分镜集实体与数据库新增配乐音轨 URL、license_id（商用留档）与失败原因字段。
-5. 配置项 `video.compose.bgm.*` 全部走环境变量注入，`enabled` 默认 false；API Key 使用 `SONILO_API_KEY`。
+5. 接入按现有 ai provider 方式动态配置：在「API 配置」中新增平台 `sonilo`（地址、密钥、出站代理），存在启用配置即开启配乐，禁用或删除即关闭；`video.compose.bgm.*` 只保留非敏感调优参数（提示词、音量、音效开关、轮询与超时）。
+6. 前端「API 配置」对话框增加 Sonilo 接入类型（地址可留空、密钥必填、协议选择器锁定），卡片不展示远程模型拉取入口。
 
 ## 验证
 
 - 新增单元测试（客户端协议行为、时长上限、混音命令构建）。
-- 既有 `VideoComposeServiceTests` 与 `FlywayMigrationNamingTests` 回归。
+- 既有 `VideoComposeServiceTests`、`FlywayMigrationNamingTests`、`ComfyUiWorkflowServiceTests`、`AiModelServiceTests` 回归。
 - Maven 编译。

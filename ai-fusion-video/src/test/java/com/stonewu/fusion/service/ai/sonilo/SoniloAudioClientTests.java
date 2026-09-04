@@ -1,7 +1,8 @@
 package com.stonewu.fusion.service.ai.sonilo;
 
 import com.stonewu.fusion.common.BusinessException;
-import com.stonewu.fusion.config.SoniloBgmProperties;
+import com.stonewu.fusion.config.EpisodeBgmProperties;
+import com.stonewu.fusion.entity.ai.ApiConfig;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -28,7 +29,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class SoniloAudioClientTests {
 
     private HttpServer server;
-    private SoniloBgmProperties properties;
+    private ApiConfig apiConfig;
     private SoniloAudioClient client;
     private Path tempDir;
 
@@ -36,12 +37,18 @@ class SoniloAudioClientTests {
     void setUp() throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.start();
-        properties = new SoniloBgmProperties();
-        properties.setEnabled(true);
-        properties.setApiKey("sk-test");
-        properties.setBaseUrl("http://127.0.0.1:" + server.getAddress().getPort());
+        EpisodeBgmProperties properties = new EpisodeBgmProperties();
         properties.setPollIntervalSeconds(0);
         properties.setTimeoutSeconds(10);
+        // 接入与密钥来自 API 配置（platform=sonilo），不再走 yaml
+        apiConfig = ApiConfig.builder()
+                .id(1L)
+                .name("Sonilo")
+                .platform(SoniloAudioClient.PLATFORM)
+                .apiKey("sk-test")
+                .apiUrl("http://127.0.0.1:" + server.getAddress().getPort())
+                .status(1)
+                .build();
         client = new SoniloAudioClient(properties);
         tempDir = Files.createTempDirectory("sonilo_client_test_");
     }
@@ -67,7 +74,7 @@ class SoniloAudioClientTests {
         });
         Path video = Files.write(tempDir.resolve("composed.mp4"), new byte[]{1, 2, 3});
 
-        String taskId = client.submitMusicTask(video, "轻快的都市剧配乐");
+        String taskId = client.submitMusicTask(apiConfig, video, "轻快的都市剧配乐");
 
         assertThat(taskId).isEqualTo("task-music-1");
         assertThat(authHeader.get()).isEqualTo("Bearer sk-test");
@@ -89,7 +96,7 @@ class SoniloAudioClientTests {
         });
         Path video = Files.write(tempDir.resolve("composed.mp4"), new byte[]{1});
 
-        client.submitMusicTask(video, "  ");
+        client.submitMusicTask(apiConfig, video, "  ");
 
         assertThat(requestBody.get()).doesNotContain("name=\"prompt\"");
     }
@@ -100,7 +107,7 @@ class SoniloAudioClientTests {
                 respond(exchange, 402, "{\"detail\":\"credit balance too low\"}"));
         Path video = Files.write(tempDir.resolve("composed.mp4"), new byte[]{1});
 
-        assertThatThrownBy(() -> client.submitSfxTask(video, null))
+        assertThatThrownBy(() -> client.submitSfxTask(apiConfig, video, null))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("余额不足");
     }
@@ -117,7 +124,7 @@ class SoniloAudioClientTests {
             }
         });
 
-        var task = client.awaitTask("task-1");
+        var task = client.awaitTask(apiConfig, "task-1");
         SoniloAudioTrack track = client.extractPrimaryTrack(task, "task-1");
 
         assertThat(polls.get()).isEqualTo(3);
@@ -131,7 +138,7 @@ class SoniloAudioClientTests {
                 respond(exchange, 200, "{\"status\":\"failed\",\"refunded\":true,"
                         + "\"error\":{\"message\":\"video decode error\"}}"));
 
-        assertThatThrownBy(() -> client.awaitTask("task-2"))
+        assertThatThrownBy(() -> client.awaitTask(apiConfig, "task-2"))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("video decode error")
                 .hasMessageContaining("费用已自动退还");
@@ -142,7 +149,7 @@ class SoniloAudioClientTests {
         server.createContext("/v1/tasks/task-3", exchange ->
                 respond(exchange, 200, "{\"status\":\"succeeded\"}"));
 
-        var task = client.awaitTask("task-3");
+        var task = client.awaitTask(apiConfig, "task-3");
 
         assertThatThrownBy(() -> client.extractPrimaryTrack(task, "task-3"))
                 .isInstanceOf(BusinessException.class)
@@ -159,10 +166,45 @@ class SoniloAudioClientTests {
         });
         Path dest = tempDir.resolve("track.m4a");
 
-        client.downloadAudio(properties.getBaseUrl() + "/download/track.m4a?sig=presigned", dest);
+        client.downloadAudio(apiConfig, apiConfig.getApiUrl() + "/download/track.m4a?sig=presigned", dest);
 
         assertThat(authHeaders).containsExactly((String) null);
         assertThat(Files.readAllBytes(dest)).isEqualTo(audioBytes);
+    }
+
+    @Test
+    void submitTaskRejectsApiConfigWithoutApiKey() throws IOException {
+        ApiConfig withoutKey = ApiConfig.builder()
+                .platform(SoniloAudioClient.PLATFORM)
+                .apiUrl(apiConfig.getApiUrl())
+                .build();
+        Path video = Files.write(tempDir.resolve("composed.mp4"), new byte[]{1});
+
+        assertThatThrownBy(() -> client.submitMusicTask(withoutKey, video, null))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("缺少 API Key")
+                .hasMessageContaining("API 配置");
+    }
+
+    @Test
+    void submitTaskTranslatesInvalidApiKeyToApiConfigHint() throws IOException {
+        server.createContext("/v1/video-to-music", exchange ->
+                respond(exchange, 401, "{\"detail\":\"invalid api key\"}"));
+        Path video = Files.write(tempDir.resolve("composed.mp4"), new byte[]{1});
+
+        assertThatThrownBy(() -> client.submitMusicTask(apiConfig, video, null))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("API 配置");
+    }
+
+    @Test
+    void resolveBaseUrlUsesOfficialAddressWhenApiUrlBlankAndStripsTrailingSlash() {
+        assertThat(SoniloAudioClient.resolveBaseUrl(ApiConfig.builder().platform(SoniloAudioClient.PLATFORM).build()))
+                .isEqualTo(SoniloAudioClient.DEFAULT_BASE_URL);
+        assertThat(SoniloAudioClient.resolveBaseUrl(ApiConfig.builder().apiUrl("  ").build()))
+                .isEqualTo(SoniloAudioClient.DEFAULT_BASE_URL);
+        assertThat(SoniloAudioClient.resolveBaseUrl(ApiConfig.builder().apiUrl("https://proxy.example/sonilo/").build()))
+                .isEqualTo("https://proxy.example/sonilo");
     }
 
     private void respond(HttpExchange exchange, int status, String body) throws IOException {

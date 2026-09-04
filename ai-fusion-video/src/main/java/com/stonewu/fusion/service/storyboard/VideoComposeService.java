@@ -6,6 +6,7 @@ import com.stonewu.fusion.entity.storage.StorageConfig;
 import com.stonewu.fusion.entity.storyboard.Storyboard;
 import com.stonewu.fusion.entity.storyboard.StoryboardEpisode;
 import com.stonewu.fusion.entity.storyboard.StoryboardItem;
+import com.stonewu.fusion.entity.ai.ApiConfig;
 import com.stonewu.fusion.entity.storyboard.StoryboardScene;
 import com.stonewu.fusion.mapper.storyboard.StoryboardEpisodeMapper;
 import com.stonewu.fusion.service.storage.MediaStorageService;
@@ -205,13 +206,14 @@ public class VideoComposeService {
                 throw new RuntimeException("ffmpeg 合成失败（concat 与 filter 均失败）");
             }
 
-            // 可选的合成后配乐：失败或跳过都不影响本集合成结果
+            // 可选的合成后配乐：存在启用的 Sonilo API 配置才执行；失败或跳过都不影响本集合成结果
             Path finalVideo = output;
             EpisodeBgmOutcome bgmOutcome = null;
             String bgmError = null;
-            if (episodeBgmService.isEnabled()) {
+            ApiConfig bgmApiConfig = episodeBgmService.resolveApiConfig();
+            if (bgmApiConfig != null) {
                 try {
-                    bgmOutcome = episodeBgmService.apply(output, workDir,
+                    bgmOutcome = episodeBgmService.apply(bgmApiConfig, output, workDir,
                             message -> taskStreamService.publishContent(taskId, message));
                     if (bgmOutcome.scoredVideoFile() != null) {
                         finalVideo = bgmOutcome.scoredVideoFile();

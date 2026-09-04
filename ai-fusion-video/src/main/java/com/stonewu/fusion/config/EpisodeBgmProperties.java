@@ -6,25 +6,16 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * 合成后配乐（Sonilo）配置。
+ * 合成后配乐的调优参数（均为非敏感项）。
  * <p>
- * 默认关闭；开启后按集合成完成时会把成片交给 Sonilo 生成配乐（可选音效），
- * 混入最终视频，并把每条音轨的 license_id 存档到分镜集。
+ * Sonilo 的接入地址、密钥与出站代理不在这里：在「设置 → AI 模型 → API 配置」中
+ * 新建平台为 {@code sonilo} 的配置即开启合成后配乐，禁用或删除即关闭，无需重启。
  */
 @Component
 @ConfigurationProperties(prefix = "video.compose.bgm")
 @Getter
 @Setter
-public class SoniloBgmProperties {
-
-    /** 是否开启合成后配乐，默认关闭，不影响既有合成流程 */
-    private boolean enabled = false;
-
-    /** Sonilo API Key，通过环境变量 SONILO_API_KEY 注入 */
-    private String apiKey = "";
-
-    /** Sonilo API 地址 */
-    private String baseUrl = "https://api.sonilo.com";
+public class EpisodeBgmProperties {
 
     /** 配乐风格提示（可留空，留空时按画面内容自动作曲） */
     private String musicPrompt = "";

@@ -4,7 +4,9 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.stonewu.fusion.common.BusinessException;
-import com.stonewu.fusion.config.SoniloBgmProperties;
+import com.stonewu.fusion.config.EpisodeBgmProperties;
+import com.stonewu.fusion.entity.ai.ApiConfig;
+import com.stonewu.fusion.service.ai.proxy.AiProxySupport;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.MediaType;
@@ -27,6 +29,9 @@ import java.util.concurrent.TimeUnit;
 /**
  * Sonilo 音频生成 REST 客户端。
  * <p>
+ * 接入地址、API Key 与出站代理全部来自平台为 {@value #PLATFORM} 的 {@link ApiConfig}，
+ * 与 ComfyUI 等非对话类接入一样在「API 配置」中动态维护；本类不持有任何密钥。
+ * <p>
  * 两个接口都是异步任务模型：上传视频提交任务拿 task_id，
  * 轮询 {@code GET /v1/tasks/{task_id}} 到终态（succeeded / failed），
  * 结果里的音轨带预签名下载地址和 license_id（商用留档凭证）。
@@ -42,6 +47,12 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public class SoniloAudioClient {
 
+    /** API 配置中的平台标识 */
+    public static final String PLATFORM = "sonilo";
+
+    /** 官方接口地址；API 配置的地址留空时使用 */
+    public static final String DEFAULT_BASE_URL = "https://api.sonilo.com";
+
     private static final String PATH_VIDEO_TO_MUSIC = "/v1/video-to-music";
     private static final String PATH_VIDEO_TO_SFX = "/v1/video-to-sfx";
     private static final String PATH_TASKS = "/v1/tasks/";
@@ -49,7 +60,7 @@ public class SoniloAudioClient {
     private static final MediaType VIDEO_MP4 = MediaType.get("video/mp4");
     private static final int MAX_ERROR_BODY_CHARS = 300;
 
-    private final SoniloBgmProperties properties;
+    private final EpisodeBgmProperties properties;
 
     private final OkHttpClient httpClient = new OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
@@ -60,37 +71,39 @@ public class SoniloAudioClient {
     /**
      * 提交配乐生成任务。
      *
-     * @param video  成片文件
-     * @param prompt 风格提示，可为空（留空按画面内容自动作曲）
+     * @param apiConfig 平台为 sonilo 的 API 配置
+     * @param video     成片文件
+     * @param prompt    风格提示，可为空（留空按画面内容自动作曲）
      * @return task_id
      */
-    public String submitMusicTask(Path video, String prompt) {
+    public String submitMusicTask(ApiConfig apiConfig, Path video, String prompt) {
         MultipartBody.Builder builder = new MultipartBody.Builder().setType(MultipartBody.FORM)
                 // 配乐接口默认流式返回，异步模式才有 task_id 可轮询
                 .addFormDataPart("mode", "async");
-        return submitTask(PATH_VIDEO_TO_MUSIC, builder, video, prompt);
+        return submitTask(apiConfig, PATH_VIDEO_TO_MUSIC, builder, video, prompt);
     }
 
     /**
      * 提交音效生成任务。
      *
-     * @param video  成片文件
-     * @param prompt 提示词，可为空
+     * @param apiConfig 平台为 sonilo 的 API 配置
+     * @param video     成片文件
+     * @param prompt    提示词，可为空
      * @return task_id
      */
-    public String submitSfxTask(Path video, String prompt) {
+    public String submitSfxTask(ApiConfig apiConfig, Path video, String prompt) {
         MultipartBody.Builder builder = new MultipartBody.Builder().setType(MultipartBody.FORM);
-        return submitTask(PATH_VIDEO_TO_SFX, builder, video, prompt);
+        return submitTask(apiConfig, PATH_VIDEO_TO_SFX, builder, video, prompt);
     }
 
     /**
      * 轮询任务直到终态。succeeded 返回完整任务 JSON；failed 抛业务异常。
      */
-    public JSONObject awaitTask(String taskId) {
+    public JSONObject awaitTask(ApiConfig apiConfig, String taskId) {
         long deadline = System.nanoTime() + Duration.ofSeconds(properties.getTimeoutSeconds()).toNanos();
         long pollIntervalMillis = Math.max(0, properties.getPollIntervalSeconds()) * 1000L;
         while (true) {
-            JSONObject task = tryQueryTask(taskId);
+            JSONObject task = tryQueryTask(apiConfig, taskId);
             if (task != null) {
                 String status = task.getStr("status");
                 if ("succeeded".equals(status)) {
@@ -123,15 +136,15 @@ public class SoniloAudioClient {
 
     /**
      * 下载结果音频。结果地址是预签名 URL、自带鉴权，
-     * 不能把 API Key 发给存储域名，这里不带任何鉴权头。
+     * 不能把 API Key 发给存储域名，这里不带任何鉴权头；出站代理沿用 API 配置。
      */
-    public void downloadAudio(String url, Path dest) {
+    public void downloadAudio(ApiConfig apiConfig, String url, Path dest) {
         Request request = new Request.Builder()
                 .url(url)
                 .header("User-Agent", USER_AGENT)
                 .get()
                 .build();
-        try (Response response = httpClient.newCall(request).execute()) {
+        try (Response response = clientFor(apiConfig).newCall(request).execute()) {
             ResponseBody body = response.body();
             if (!response.isSuccessful() || body == null) {
                 throw new BusinessException("配乐结果下载失败 (HTTP " + response.code() + ")");
@@ -147,7 +160,30 @@ public class SoniloAudioClient {
         }
     }
 
-    private String submitTask(String path, MultipartBody.Builder builder, Path video, String prompt) {
+    /**
+     * 校验 API 配置里填了密钥，未填直接给出可操作的提示。
+     */
+    public static String requireApiKey(ApiConfig apiConfig) {
+        String apiKey = apiConfig != null ? apiConfig.getApiKey() : null;
+        if (StrUtil.isBlank(apiKey)) {
+            throw new BusinessException("Sonilo API 配置缺少 API Key，请在「设置 → AI 模型 → API 配置」中填写"
+                    + "（sonilo.com 可获取）");
+        }
+        return apiKey.trim();
+    }
+
+    /**
+     * 解析请求根地址。API 配置保存时与官方地址相同的会被归一为空，这里按官方地址补回；统一去掉末尾斜杠。
+     */
+    static String resolveBaseUrl(ApiConfig apiConfig) {
+        String apiUrl = apiConfig != null ? apiConfig.getApiUrl() : null;
+        String baseUrl = StrUtil.isBlank(apiUrl) ? DEFAULT_BASE_URL : apiUrl.trim();
+        return baseUrl.replaceAll("/+$", "");
+    }
+
+    private String submitTask(ApiConfig apiConfig, String path, MultipartBody.Builder builder,
+                              Path video, String prompt) {
+        String apiKey = requireApiKey(apiConfig);
         if (StrUtil.isNotBlank(prompt)) {
             builder.addFormDataPart("prompt", prompt.trim());
         }
@@ -159,12 +195,12 @@ public class SoniloAudioClient {
         }
 
         Request request = new Request.Builder()
-                .url(properties.getBaseUrl() + path)
-                .header("Authorization", "Bearer " + properties.getApiKey())
+                .url(resolveBaseUrl(apiConfig) + path)
+                .header("Authorization", "Bearer " + apiKey)
                 .header("User-Agent", USER_AGENT)
                 .post(builder.build())
                 .build();
-        try (Response response = httpClient.newCall(request).execute()) {
+        try (Response response = clientFor(apiConfig).newCall(request).execute()) {
             String body = readBody(response);
             if (!response.isSuccessful()) {
                 throw new BusinessException(buildHttpErrorMessage(response.code(), body));
@@ -184,14 +220,14 @@ public class SoniloAudioClient {
     /**
      * 单次查询任务。5xx / 网络异常返回 null 交给上层按时限重试；4xx 直接抛出。
      */
-    private JSONObject tryQueryTask(String taskId) {
+    private JSONObject tryQueryTask(ApiConfig apiConfig, String taskId) {
         Request request = new Request.Builder()
-                .url(properties.getBaseUrl() + PATH_TASKS + taskId)
-                .header("Authorization", "Bearer " + properties.getApiKey())
+                .url(resolveBaseUrl(apiConfig) + PATH_TASKS + taskId)
+                .header("Authorization", "Bearer " + requireApiKey(apiConfig))
                 .header("User-Agent", USER_AGENT)
                 .get()
                 .build();
-        try (Response response = httpClient.newCall(request).execute()) {
+        try (Response response = clientFor(apiConfig).newCall(request).execute()) {
             String body = readBody(response);
             if (response.code() >= 500) {
                 log.warn("[SoniloAudio] 查询任务返回 {}，将重试: taskId={}", response.code(), taskId);
@@ -208,6 +244,13 @@ public class SoniloAudioClient {
         }
     }
 
+    /**
+     * 按 API 配置的出站代理设置派生客户端；未配置代理时复用共享客户端。
+     */
+    private OkHttpClient clientFor(ApiConfig apiConfig) {
+        return AiProxySupport.okHttpClient(httpClient, apiConfig);
+    }
+
     private String readBody(Response response) throws IOException {
         ResponseBody body = response.body();
         return body == null ? "" : body.string();
@@ -216,7 +259,7 @@ public class SoniloAudioClient {
     private String buildHttpErrorMessage(int code, String body) {
         String detail = extractErrorDetail(body);
         return switch (code) {
-            case 401 -> "Sonilo API Key 无效，请检查 SONILO_API_KEY 配置";
+            case 401 -> "Sonilo API Key 无效，请检查 API 配置中填写的密钥";
             case 402 -> "Sonilo 账户余额不足（sonilo.com 可查用量）: " + detail;
             case 413 -> "视频文件过大，超出 Sonilo 上传体积上限: " + detail;
             case 422 -> "Sonilo 参数不合法（常见：视频超出时长上限）: " + detail;

@@ -64,11 +64,9 @@ video:
   compose:
     ffmpeg-path: ${VIDEO_COMPOSE_FFMPEG_PATH:ffmpeg}
     ffprobe-path: ${VIDEO_COMPOSE_FFPROBE_PATH:ffprobe}
-    # 合成后配乐（Sonilo），默认关闭；开启后本集合成完成时自动生成配乐并混入成片
+    # 合成后配乐（Sonilo）的调优参数。开关、地址与密钥不在这里：
+    # 在「设置 → AI 模型 → API 配置」新建平台为 sonilo 的配置即开启，禁用或删除即关闭
     bgm:
-      enabled: ${VIDEO_COMPOSE_BGM_ENABLED:false}
-      api-key: ${SONILO_API_KEY:}
-      base-url: ${SONILO_BASE_URL:https://api.sonilo.com}
       # 配乐风格提示，可留空（留空按画面内容自动作曲）
       music-prompt: ${VIDEO_COMPOSE_BGM_MUSIC_PROMPT:}
       # 与成片原声混音时配乐音轨的音量（0~1）
