@@ -1,6 +1,7 @@
 package com.stonewu.fusion.service.ai.sonilo;
 
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.stonewu.fusion.common.BusinessException;
@@ -34,7 +35,7 @@ import java.util.concurrent.TimeUnit;
  * <p>
  * 两个接口都是异步任务模型：上传视频提交任务拿 task_id，
  * 轮询 {@code GET /v1/tasks/{task_id}} 到终态（succeeded / failed），
- * 结果里的音轨带预签名下载地址和 license_id（商用留档凭证）。
+ * 结果里的音轨带预签名下载地址。
  * <ul>
  * <li>配乐：{@code POST /v1/video-to-music}（mode=async），视频上限 6 分钟</li>
  * <li>音效：{@code POST /v1/video-to-sfx}（本身即异步任务），视频上限 3 分钟</li>
@@ -124,14 +125,21 @@ public class SoniloAudioClient {
 
     /**
      * 取任务结果中的主音轨（audio 字段）。
+     * 配乐任务的 audio 是数组（每个变体一条，默认只有一条），音效任务的 audio 是单个对象；两种形态都取第一条。
      */
     public SoniloAudioTrack extractPrimaryTrack(JSONObject task, String taskId) {
-        JSONObject audio = task.getJSONObject("audio");
+        Object audioNode = task.get("audio");
+        JSONObject audio = null;
+        if (audioNode instanceof JSONArray array) {
+            audio = array.isEmpty() ? null : array.getJSONObject(0);
+        } else if (audioNode instanceof JSONObject object) {
+            audio = object;
+        }
         String url = audio != null ? audio.getStr("url") : null;
         if (StrUtil.isBlank(url)) {
             throw new BusinessException("Sonilo 任务成功但未返回音轨结果，task_id: " + taskId);
         }
-        return new SoniloAudioTrack(url, audio.getStr("license_id"));
+        return new SoniloAudioTrack(url);
     }
 
     /**

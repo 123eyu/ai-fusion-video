@@ -37,8 +37,7 @@ import java.util.function.Consumer;
  * （时长与成片自动对齐，无提示词也可用；可选同时生成音效音轨），
  * 下载音轨并持久化留档，再用 ffmpeg 把音轨混入成片（视频流零转码）。
  * <p>
- * 配乐音乐自带授权、可商用（以 Sonilo 条款为准），每条音轨返回 license_id，
- * 随分镜集一并落库，便于商用留档与审计；单独的音效音轨为免版税。
+ * 配乐音乐自带授权、可商用（以 Sonilo 条款为准）；单独的音效音轨为免版税。
  */
 @Service
 @Slf4j
@@ -126,7 +125,6 @@ public class EpisodeBgmService {
 
         Path sfxFile = null;
         String sfxStoredUrl = null;
-        String sfxLicenseId = null;
         if (properties.isSfxEnabled()) {
             if (sfxAllowed(durationSeconds)) {
                 // 音效是可选加分项：失败只记录原因，保留已生成的配乐
@@ -139,11 +137,9 @@ public class EpisodeBgmService {
                     soniloAudioClient.downloadAudio(apiConfig, sfxTrack.url(), sfxFile);
                     sfxStoredUrl = mediaStorageService.storeFile(
                             sfxFile, "audio/bgm", trimDot(audioExtension(sfxTrack.url())));
-                    sfxLicenseId = sfxTrack.licenseId();
                 } catch (Exception e) {
                     sfxFile = null;
                     sfxStoredUrl = null;
-                    sfxLicenseId = null;
                     log.error("[EpisodeBgm] 音效生成失败，本次仅合入配乐", e);
                     progress.accept("音效生成失败：" + e.getMessage() + "，本次仅合入配乐");
                 }
@@ -162,16 +158,15 @@ public class EpisodeBgmService {
 
         return new EpisodeBgmOutcome(
                 scoredVideo,
+                musicTaskId,
                 musicStoredUrl,
-                musicTrack.licenseId(),
                 sfxStoredUrl,
-                sfxLicenseId,
                 null);
     }
 
     /**
      * 配乐前置校验。返回非 null 表示跳过配乐的原因。
-     * 本地探测不到时长时交给后端强校验（超上限直接拒绝、不扣费）。
+     * 本地探测不到时长时交给后端强校验（超上限直接拒绝）。
      */
     String musicSkipReason(double durationSeconds) {
         if (durationSeconds > MUSIC_MAX_SECONDS) {

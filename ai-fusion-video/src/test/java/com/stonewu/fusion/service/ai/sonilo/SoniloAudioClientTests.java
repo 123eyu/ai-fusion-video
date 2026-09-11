@@ -1,5 +1,6 @@
 package com.stonewu.fusion.service.ai.sonilo;
 
+import cn.hutool.json.JSONUtil;
 import com.stonewu.fusion.common.BusinessException;
 import com.stonewu.fusion.config.EpisodeBgmProperties;
 import com.stonewu.fusion.entity.ai.ApiConfig;
@@ -120,7 +121,7 @@ class SoniloAudioClientTests {
                 respond(exchange, 200, "{\"status\":\"processing\"}");
             } else {
                 respond(exchange, 200, "{\"status\":\"succeeded\",\"audio\":"
-                        + "{\"url\":\"http://cdn.example/track.m4a?sig=abc\",\"license_id\":\"lic-42\"}}");
+                        + "[{\"url\":\"http://cdn.example/track.m4a?sig=abc\",\"stream_index\":0}]}");
             }
         });
 
@@ -129,7 +130,15 @@ class SoniloAudioClientTests {
 
         assertThat(polls.get()).isEqualTo(3);
         assertThat(track.url()).isEqualTo("http://cdn.example/track.m4a?sig=abc");
-        assertThat(track.licenseId()).isEqualTo("lic-42");
+    }
+
+    @Test
+    void extractPrimaryTrackAcceptsSingleObjectAudio() {
+        var task = JSONUtil.parseObj("{\"status\":\"succeeded\",\"audio\":{\"url\":\"http://cdn.example/sfx.m4a?sig=x\"}}");
+
+        SoniloAudioTrack track = client.extractPrimaryTrack(task, "task-2");
+
+        assertThat(track.url()).isEqualTo("http://cdn.example/sfx.m4a?sig=x");
     }
 
     @Test

@@ -145,10 +145,9 @@ public class VideoComposeService {
             .set("compose_error_msg", null)
             .set("composed_video_url", null)
             .set("composed_at", null)
+            .set("bgm_task_id", null)
             .set("bgm_audio_url", null)
-            .set("bgm_license_id", null)
             .set("bgm_sfx_audio_url", null)
-            .set("bgm_sfx_license_id", null)
             .set("bgm_error_msg", null));
         if (updated == 0) {
             taskStreamService.fail(taskId, "本集已在合成中，请稍候");
@@ -235,10 +234,9 @@ public class VideoComposeService {
             update.setComposedAt(LocalDateTime.now());
             update.setComposeErrorMsg(null);
             if (bgmOutcome != null) {
+                update.setBgmTaskId(bgmOutcome.musicTaskId());
                 update.setBgmAudioUrl(bgmOutcome.musicAudioUrl());
-                update.setBgmLicenseId(bgmOutcome.musicLicenseId());
                 update.setBgmSfxAudioUrl(bgmOutcome.sfxAudioUrl());
-                update.setBgmSfxLicenseId(bgmOutcome.sfxLicenseId());
             }
             update.setBgmErrorMsg(bgmError);
             episodeMapper.updateById(update);
@@ -260,8 +258,8 @@ public class VideoComposeService {
         StringBuilder message = new StringBuilder("✓ 合成完成 · 视频地址：").append(storedUrl);
         if (bgmOutcome != null && bgmOutcome.scoredVideoFile() != null) {
             message.append(" · 配乐已合入");
-            if (StringUtils.hasText(bgmOutcome.musicLicenseId())) {
-                message.append("（license_id: ").append(bgmOutcome.musicLicenseId()).append("）");
+            if (StringUtils.hasText(bgmOutcome.musicTaskId())) {
+                message.append("（Sonilo task_id: ").append(bgmOutcome.musicTaskId()).append("）");
             }
         } else if (bgmOutcome != null && StringUtils.hasText(bgmOutcome.skippedReason())) {
             message.append(" · ").append(bgmOutcome.skippedReason());
