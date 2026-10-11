@@ -890,7 +890,7 @@ export default function GenerationWorkbench({ mode }: GenerationWorkbenchProps) 
                     onUseReference={useReference}
                     onCancel={taskId => void cancelTask(taskId)}
                     cancellingTaskIds={cancellingTaskIds}
-                    onDelete={id => void deleteTask(id)}
+                    onDelete={deleteTask}
                     onAddAsset={(item, prompt) =>
                       setAssetTarget({ mode, item, prompt })
                     }

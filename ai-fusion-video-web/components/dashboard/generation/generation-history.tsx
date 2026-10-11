@@ -8,9 +8,8 @@ import {
   RotateCcw,
   Square,
   Sparkles,
-  Trash2,
 } from "lucide-react";
-import { useConfirm } from "@/components/ui/confirm-dialog";
+import { GenerationDeleteButton } from "./generation-delete-button";
 import type { AiModel } from "@/lib/api/ai-model";
 import { getModelDisplayParts } from "@/lib/model-display";
 import { Button } from "@/components/ui/button";
@@ -70,7 +69,7 @@ interface GenerationHistoryProps {
   onAddAsset: (item: GenerationResultItem, prompt: string) => void;
   onCancel: (taskId: string) => void;
   cancellingTaskIds: Set<string>;
-  onDelete: (id: number) => void;
+  onDelete: (id: number) => Promise<void>;
 }
 
 export function GenerationHistory({
@@ -91,7 +90,6 @@ export function GenerationHistory({
 }: GenerationHistoryProps) {
   const [mediaPreview, setMediaPreview] = useState<GenerationMediaPreview | null>(null);
   const modelsById = new Map(models.map((model) => [model.id, model]));
-  const { confirm } = useConfirm();
 
   if (loading && entries.length === 0) {
     return (
@@ -277,25 +275,9 @@ export function GenerationHistory({
                   <RotateCcw className="h-3 w-3" />
                   再次使用
                 </Button>
-                <Button
-                  variant="destructive-ghost"
-                  size="xs"
-                  onClick={async () => {
-                    const confirmed = await confirm({
-                      title: "删除创作记录",
-                      description: "删除后该任务的生成记录和结果将无法恢复，确定删除吗？",
-                      confirmText: "确定删除",
-                      variant: "destructive",
-                    });
-                    if (confirmed) {
-                      onDelete(task.id);
-                    }
-                  }}
-                  title="删除创作记录"
-                >
-                  <Trash2 className="h-3 w-3" />
-                  删除
-                </Button>
+                {(task.status === 2 || task.status === 3) && (
+                  <GenerationDeleteButton recordId={task.id} onDelete={onDelete} />
+                )}
               </div>
             </header>
 

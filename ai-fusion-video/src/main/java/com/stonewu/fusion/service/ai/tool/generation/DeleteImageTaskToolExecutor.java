@@ -38,9 +38,9 @@ public class DeleteImageTaskToolExecutor implements ToolExecutor {
                 {
                     "type": "object",
                     "properties": {
-                        "taskId": {"type": "integer", "description": "要删除的图片生成任务ID"}
+                        "recordId": {"type": "integer", "description": "要删除的图片生成记录ID（生成工具返回的 recordId）"}
                     },
-                    "required": ["taskId"],
+                    "required": ["recordId"],
                     "additionalProperties": false
                 }
                 """;
@@ -50,14 +50,14 @@ public class DeleteImageTaskToolExecutor implements ToolExecutor {
     public String execute(String toolInput, ToolExecutionContext context) {
         try {
             JSONObject params = JSONUtil.parseObj(toolInput);
-            Long taskId = params.getLong("taskId");
-            if (taskId == null) {
-                return error("缺少 taskId");
+            Long recordId = params.getLong("recordId");
+            if (recordId == null) {
+                return error("缺少 recordId");
             }
-            imageGenerationService.delete(taskId, context.getUserId());
+            imageGenerationService.delete(recordId, context.getUserId());
             return JSONUtil.createObj()
                     .set("status", "success")
-                    .set("deletedTaskId", taskId)
+                    .set("deletedRecordId", recordId)
                     .toString();
         } catch (Exception e) {
             log.error("删除图片生成任务失败", e);

@@ -8,6 +8,7 @@ import com.stonewu.fusion.entity.generation.ImageItem;
 import com.stonewu.fusion.entity.generation.ImageTask;
 import com.stonewu.fusion.mapper.generation.ImageItemMapper;
 import com.stonewu.fusion.mapper.generation.ImageTaskMapper;
+import com.stonewu.fusion.infrastructure.queue.RedisTaskQueue;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
@@ -28,6 +29,7 @@ public class ImageGenerationService {
 
     private final ImageTaskMapper taskMapper;
     private final ImageItemMapper itemMapper;
+    private final RedisTaskQueue taskQueue;
 
     @Cacheable(value = "imageTask", key = "#id")
     public ImageTask getById(Long id) {
@@ -70,7 +72,9 @@ public class ImageGenerationService {
         ImageTask task = getById(id);
         task.setStatus(status);
         task.setErrorMsg(errorMsg);
-        taskMapper.updateById(task);
+        if (taskMapper.updateById(task) != 1) {
+            throw new BusinessException(409, "图片任务已删除，不能继续执行");
+        }
     }
 
     @Caching(evict = {
@@ -79,10 +83,19 @@ public class ImageGenerationService {
     })
     @Transactional
     public void delete(Long id, Long userId) {
-        ImageTask task = taskMapper.selectById(id);
-        if (task == null || !task.getUserId().equals(userId)) {
-            return;
+        ImageTask task = taskMapper.selectOne(new LambdaQueryWrapper<ImageTask>()
+                .eq(ImageTask::getId, id).last("FOR UPDATE"));
+        if (task == null || userId == null || !userId.equals(task.getUserId())) {
+            throw new BusinessException(404, "图片任务不存在");
         }
+        if (!Integer.valueOf(2).equals(task.getStatus()) && !Integer.valueOf(3).equals(task.getStatus())) {
+            throw new BusinessException(409, "请等待图片生成结束后再删除记录");
+        }
+        String queueName = "image_generation:model:" + task.getModelId();
+        if (taskQueue.isRunning(queueName, task.getTaskId())) {
+            throw new BusinessException(409, "图片任务仍在结束处理中，请稍后再删除");
+        }
+        taskQueue.remove(queueName, task.getTaskId());
         // 删除关联的图片条目
         itemMapper.delete(new LambdaQueryWrapper<ImageItem>().eq(ImageItem::getTaskId, id));
         taskMapper.deleteById(id);
