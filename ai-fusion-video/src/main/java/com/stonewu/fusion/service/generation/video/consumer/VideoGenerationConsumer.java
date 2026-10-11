@@ -14,6 +14,7 @@ import com.stonewu.fusion.service.ai.ApiConfigService;
 import com.stonewu.fusion.service.ai.comfyui.ComfyUiWorkflowService;
 import com.stonewu.fusion.service.ai.proxy.AiProxySupport;
 import com.stonewu.fusion.service.generation.GenerationModelCapabilityService;
+import com.stonewu.fusion.service.generation.ProviderMediaAuthorization;
 import com.stonewu.fusion.service.generation.ReferenceImageTransportService;
 import com.stonewu.fusion.service.generation.video.VideoFrameExtractor;
 import com.stonewu.fusion.service.generation.video.VideoGenerationService;
@@ -384,16 +385,10 @@ public class VideoGenerationConsumer {
             boolean updated = false;
 
             if (StrUtil.isNotBlank(item.getVideoUrl())) {
-                try {
-                    String persistedUrl = persistProviderMedia(
-                            item.getVideoUrl(), "videos", apiConfig, true);
-                    item.setVideoUrl(persistedUrl);
-                    updated = true;
-                    log.info("[VideoConsumer] 视频已持久化: itemId={}, stored={}", item.getId(), persistedUrl);
-                } catch (Exception e) {
-                    log.warn("[VideoConsumer] 视频持久化失败（保留原始 URL）: itemId={}, error={}",
-                            item.getId(), e.getMessage());
-                }
+                String persistedUrl = persistProviderMedia(item.getVideoUrl(), "videos", apiConfig, true);
+                item.setVideoUrl(persistedUrl);
+                updated = true;
+                log.info("[VideoConsumer] 视频已持久化: itemId={}, stored={}", item.getId(), persistedUrl);
             }
 
             if (StrUtil.isNotBlank(item.getFirstFrameUrl())) {
@@ -507,40 +502,12 @@ public class VideoGenerationConsumer {
     }
 
     private boolean shouldForwardApiAuthorization(String mediaUrl, ApiConfig apiConfig) {
-        if (apiConfig == null || StrUtil.isBlank(apiConfig.getApiKey()) || StrUtil.isBlank(apiConfig.getApiUrl())) {
-            return false;
-        }
-        try {
-            URI media = URI.create(mediaUrl);
-            URI api = URI.create(apiConfig.getApiUrl());
-            return isHttpScheme(media.getScheme())
-                    && equalsIgnoreCase(media.getScheme(), api.getScheme())
-                    && equalsIgnoreCase(media.getHost(), api.getHost())
-                    && effectivePort(media) == effectivePort(api);
-        } catch (IllegalArgumentException e) {
-            return false;
-        }
-    }
-
-    private static boolean isHttpScheme(String scheme) {
-        return "http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme);
-    }
-
-    private static boolean equalsIgnoreCase(String left, String right) {
-        return left != null && right != null && left.equalsIgnoreCase(right);
-    }
-
-    private static int effectivePort(URI uri) {
-        if (uri.getPort() >= 0) {
-            return uri.getPort();
-        }
-        if ("https".equalsIgnoreCase(uri.getScheme())) {
-            return 443;
-        }
-        if ("http".equalsIgnoreCase(uri.getScheme())) {
-            return 80;
-        }
-        return -1;
+        String platform = apiConfig == null ? "" : StrUtil.blankToDefault(apiConfig.getPlatform(), "");
+        String defaultApiUrl = switch (platform) {
+            case "openai", "openai_compatible", "newapi", "agnes" -> "https://api.openai.com";
+            default -> null;
+        };
+        return ProviderMediaAuthorization.shouldAuthorize(mediaUrl, apiConfig, defaultApiUrl);
     }
 
     private static String resolveMediaExtension(String contentType, String sourceUrl, boolean video) {

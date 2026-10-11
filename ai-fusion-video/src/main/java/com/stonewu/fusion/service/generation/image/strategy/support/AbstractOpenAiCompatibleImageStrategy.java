@@ -9,6 +9,7 @@ import com.stonewu.fusion.entity.generation.ImageItem;
 import com.stonewu.fusion.entity.generation.ImageTask;
 import com.stonewu.fusion.service.ai.AiModelService;
 import com.stonewu.fusion.service.ai.proxy.AiProxySupport;
+import com.stonewu.fusion.service.generation.ProviderMediaAuthorization;
 import com.stonewu.fusion.service.generation.image.ImageGenerationService;
 import com.stonewu.fusion.service.generation.image.strategy.ImageGenerationStrategy;
 import com.stonewu.fusion.service.storage.MediaStorageService;
@@ -19,6 +20,9 @@ import okhttp3.Response;
 
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -143,8 +147,8 @@ public abstract class AbstractOpenAiCompatibleImageStrategy implements ImageGene
                     providerLabel(), context.modelCode(), context.width(), context.height(), protocolRequest.url(),
                     attempt + 1, requestAttempts);
             String responseBody = execute(protocolRequest, context.apiConfig(), "图片生成");
-            List<String> parsedUrls = protocolAdapter.parseImageUrls(requestContext, responseBody);
-            generatedUrls.addAll(persistGeneratedImages(parsedUrls, context.apiConfig()));
+            generatedUrls.addAll(protocolAdapter.parseImageUrls(requestContext, responseBody,
+                    url -> persistGeneratedImage(url, context.apiConfig())));
         }
 
         return generatedUrls.size() <= desiredCount
@@ -235,9 +239,6 @@ public abstract class AbstractOpenAiCompatibleImageStrategy implements ImageGene
         if (urls == null || urls.isEmpty()) {
             return List.of();
         }
-        if (mediaStorageService == null) {
-            return urls;
-        }
 
         List<String> persisted = new ArrayList<>(urls.size());
         for (String url : urls) {
@@ -251,6 +252,7 @@ public abstract class AbstractOpenAiCompatibleImageStrategy implements ImageGene
     }
 
     private String persistGeneratedImage(String remoteUrl, ApiConfig apiConfig) {
+        if (remoteUrl.startsWith("/media/")) return remoteUrl;
         if (!isHttpUrl(remoteUrl)) {
             return mediaStorageService.downloadAndStore(remoteUrl, "images");
         }
@@ -264,45 +266,41 @@ public abstract class AbstractOpenAiCompatibleImageStrategy implements ImageGene
         }
 
         OkHttpClient client = AiProxySupport.okHttpClient(okHttpClient, apiConfig);
+        Path tempFile = null;
         try (Response response = client.newCall(builder.build()).execute()) {
             if (!response.isSuccessful() || response.body() == null) {
                 throw new RuntimeException(providerLabel() + " 生成图片持久化失败: HTTP " + response.code()
                         + " - " + remoteUrl);
             }
             String extension = imageExtension(response.header("Content-Type"), remoteUrl);
-            String storedUrl = mediaStorageService.storeBytes(response.body().bytes(), "images", extension);
+            tempFile = Files.createTempFile("fusion-provider-image-", "." + extension);
+            Files.copy(response.body().byteStream(), tempFile, StandardCopyOption.REPLACE_EXISTING);
+            if (Files.size(tempFile) == 0) throw new BusinessException("生成图片为空");
+            String storedUrl = mediaStorageService.storeFile(tempFile, "images", extension);
             log.info("[{} Image] 生成图片已持久化: source={}, stored={}",
                     providerLabel(), remoteUrl, storedUrl);
             return storedUrl;
         } catch (IOException e) {
             throw new RuntimeException(providerLabel() + " 生成图片持久化异常: " + e.getMessage(), e);
+        } finally {
+            if (tempFile != null) {
+                try {
+                    Files.deleteIfExists(tempFile);
+                } catch (IOException e) {
+                    log.warn("清理生成图片临时文件失败: {}", tempFile, e);
+                }
+            }
         }
     }
 
     private boolean shouldForwardApiAuthorization(String remoteUrl, ApiConfig apiConfig) {
-        if (apiConfig == null || StrUtil.isBlank(apiConfig.getApiKey()) || StrUtil.isBlank(apiConfig.getApiUrl())) {
-            return false;
-        }
-        try {
-            URI remote = URI.create(remoteUrl);
-            URI api = URI.create(apiConfig.getApiUrl());
-            return equalsIgnoreCase(remote.getScheme(), api.getScheme())
-                    && equalsIgnoreCase(remote.getHost(), api.getHost())
-                    && effectivePort(remote) == effectivePort(api);
-        } catch (IllegalArgumentException e) {
-            return false;
-        }
+        return ProviderMediaAuthorization.shouldAuthorize(
+                remoteUrl, apiConfig, OpenAiCompatibleImageProtocolSupport.DEFAULT_BASE_URL);
     }
 
-    private static boolean equalsIgnoreCase(String left, String right) {
-        return left != null && right != null && left.equalsIgnoreCase(right);
-    }
-
-    private static int effectivePort(URI uri) {
-        if (uri.getPort() >= 0) return uri.getPort();
-        if ("https".equalsIgnoreCase(uri.getScheme())) return 443;
-        if ("http".equalsIgnoreCase(uri.getScheme())) return 80;
-        return -1;
+    @Override
+    public boolean persistsResults() {
+        return true;
     }
 
     private static boolean isHttpUrl(String value) {
@@ -313,6 +311,7 @@ public abstract class AbstractOpenAiCompatibleImageStrategy implements ImageGene
     private static String imageExtension(String contentType, String url) {
         String normalized = StrUtil.blankToDefault(contentType, "").split(";", 2)[0].trim().toLowerCase(Locale.ROOT);
         return switch (normalized) {
+            case "image/png" -> "png";
             case "image/jpeg", "image/jpg" -> "jpg";
             case "image/webp" -> "webp";
             case "image/gif" -> "gif";
