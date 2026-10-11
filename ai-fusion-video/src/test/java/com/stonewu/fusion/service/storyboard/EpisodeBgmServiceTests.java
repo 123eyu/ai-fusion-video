@@ -77,8 +77,7 @@ class EpisodeBgmServiceTests {
         assertThat(episodeBgmService.musicSkipReason(EpisodeBgmService.MUSIC_MAX_SECONDS)).isNull();
         assertThat(episodeBgmService.musicSkipReason(EpisodeBgmService.MUSIC_MAX_SECONDS + 1))
                 .contains("超过配乐上限");
-        // 本地探测不到时长（0）时不拦截，交给后端强校验
-        assertThat(episodeBgmService.musicSkipReason(0)).isNull();
+        assertThat(episodeBgmService.musicSkipReason(0)).contains("无法确定");
     }
 
     @Test
@@ -89,29 +88,29 @@ class EpisodeBgmServiceTests {
 
     @Test
     void mixCommandMapsMusicDirectlyWhenNoOtherAudio() {
-        List<String> command = episodeBgmService.buildMixCommand(video, music, null, false, output);
+        List<String> command = episodeBgmService.buildMixCommand(video, music, null, false, 4, output);
 
-        assertThat(command).containsSubsequence("-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac");
-        assertThat(command).doesNotContain("-filter_complex");
-        assertThat(command).contains("-shortest");
+        assertThat(command).containsSubsequence("-map", "0:v:0", "-map", "[aout]", "-c:v", "copy", "-c:a", "aac");
+        assertThat(command.get(command.indexOf("-filter_complex") + 1)).contains("volume=0.70,apad");
+        assertThat(command).containsSubsequence("-t", "4.000").doesNotContain("-shortest");
     }
 
     @Test
     void mixCommandMixesWithOriginalAudioAtConfiguredVolume() {
-        List<String> command = episodeBgmService.buildMixCommand(video, music, null, true, output);
+        List<String> command = episodeBgmService.buildMixCommand(video, music, null, true, 4, output);
 
         int filterIndex = command.indexOf("-filter_complex");
         assertThat(filterIndex).isPositive();
         String filter = command.get(filterIndex + 1);
         assertThat(filter)
                 .contains("[1:a]volume=0.70[bgm]")
-                .contains("[0:a][bgm]amix=inputs=2:duration=first:normalize=0[aout]");
-        assertThat(command).containsSubsequence("-map", "0:v", "-map", "[aout]", "-c:v", "copy");
+                .contains("[0:a][bgm]amix=inputs=2:duration=longest:normalize=0,apad[aout]");
+        assertThat(command).containsSubsequence("-map", "0:v:0", "-map", "[aout]", "-c:v", "copy");
     }
 
     @Test
     void mixCommandMixesThreeTracksWhenSfxPresent() {
-        List<String> command = episodeBgmService.buildMixCommand(video, music, sfx, true, output);
+        List<String> command = episodeBgmService.buildMixCommand(video, music, sfx, true, 4, output);
 
         String filter = command.get(command.indexOf("-filter_complex") + 1);
         assertThat(filter).contains("amix=inputs=3");

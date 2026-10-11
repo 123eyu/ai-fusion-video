@@ -195,12 +195,8 @@ public class SoniloAudioClient {
         if (StrUtil.isNotBlank(prompt)) {
             builder.addFormDataPart("prompt", prompt.trim());
         }
-        try {
-            builder.addFormDataPart("video", video.getFileName().toString(),
-                    RequestBody.create(Files.readAllBytes(video), VIDEO_MP4));
-        } catch (IOException e) {
-            throw new BusinessException("读取成片文件失败: " + e.getMessage());
-        }
+        builder.addFormDataPart("video", video.getFileName().toString(),
+                RequestBody.create(video.toFile(), VIDEO_MP4));
 
         Request request = new Request.Builder()
                 .url(resolveBaseUrl(apiConfig) + path)

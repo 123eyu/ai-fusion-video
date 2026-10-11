@@ -11,6 +11,7 @@ import com.stonewu.fusion.service.ai.proxy.AiProxySupport;
 import com.stonewu.fusion.service.ai.sonilo.SoniloAudioClient;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,6 +24,7 @@ public class ApiConfigService {
     private final ApiConfigMapper apiConfigMapper;
     private final ObjectProvider<ChatModelFactory> chatModelFactoryProvider;
 
+    @CacheEvict(value = "episodeBgmConfig", allEntries = true)
     @Transactional
     public Long createApiConfig(ApiConfig apiConfig) {
         applyPlatformDefaults(apiConfig);
@@ -38,6 +40,7 @@ public class ApiConfigService {
         return apiConfig.getId();
     }
 
+    @CacheEvict(value = "episodeBgmConfig", allEntries = true)
     @Transactional
     public void updateApiConfig(Long id, String name, String platform,
                                  String textProtocol, String imageProtocol, String videoProtocol,
@@ -74,6 +77,7 @@ public class ApiConfigService {
         evictModelCaches();
     }
 
+    @CacheEvict(value = "episodeBgmConfig", allEntries = true)
     @Transactional
     public void deleteApiConfig(Long id) {
         apiConfigMapper.deleteById(id);
@@ -204,6 +208,7 @@ public class ApiConfigService {
             return;
         }
         if (SoniloAudioClient.PLATFORM.equalsIgnoreCase(config.getPlatform())) {
+            SoniloAudioClient.requireApiKey(config);
             // 音频生成接入：只有地址与密钥，不参与文本 / 图片 / 视频协议路由
             config.setTextProtocol(null);
             config.setImageProtocol(null);

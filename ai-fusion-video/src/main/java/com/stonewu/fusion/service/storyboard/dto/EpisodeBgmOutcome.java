@@ -9,7 +9,7 @@ import java.nio.file.Path;
  * @param musicTaskId     Sonilo 配乐任务ID（授权记录查询凭据）
  * @param musicAudioUrl   配乐音轨持久化后的URL
  * @param sfxAudioUrl     音效音轨持久化后的URL（未开启或跳过时为 null）
- * @param skippedReason   跳过配乐的原因；为 null 表示配乐已生成
+ * @param skippedReason   跳过配乐或音效的原因；为 null 表示所有启用步骤均成功
  */
 public record EpisodeBgmOutcome(
         Path scoredVideoFile,

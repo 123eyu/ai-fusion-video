@@ -214,6 +214,7 @@ public class VideoComposeService {
                 try {
                     bgmOutcome = episodeBgmService.apply(bgmApiConfig, output, workDir,
                             message -> taskStreamService.publishContent(taskId, message));
+                    bgmError = bgmOutcome.skippedReason();
                     if (bgmOutcome.scoredVideoFile() != null) {
                         finalVideo = bgmOutcome.scoredVideoFile();
                     }
@@ -261,7 +262,8 @@ public class VideoComposeService {
             if (StringUtils.hasText(bgmOutcome.musicTaskId())) {
                 message.append("（Sonilo task_id: ").append(bgmOutcome.musicTaskId()).append("）");
             }
-        } else if (bgmOutcome != null && StringUtils.hasText(bgmOutcome.skippedReason())) {
+        }
+        if (bgmOutcome != null && StringUtils.hasText(bgmOutcome.skippedReason())) {
             message.append(" · ").append(bgmOutcome.skippedReason());
         } else if (StringUtils.hasText(bgmError)) {
             message.append(" · 配乐失败：").append(bgmError);

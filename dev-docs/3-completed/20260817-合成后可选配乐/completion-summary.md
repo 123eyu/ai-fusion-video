@@ -14,7 +14,7 @@
 - 前端：`PLATFORM_OPTIONS` / `PLATFORM_LABELS` 增加 Sonilo；`getPlatformFields("sonilo")` 给出地址与密钥字段；API 配置对话框选中 Sonilo 时清空协议并锁定协议选择器、密钥必填；卡片对该平台不显示远程模型拉取按钮。
 - `EpisodeBgmService`：本地 ffprobe 时长预检（配乐 6 分钟、音效 3 分钟上限，探测不到时交后端强校验）；混音统一 `-c:v copy` 零转码，成片有原声时配乐先按 `music-volume` 降音量再 `amix`。
 - `VideoComposeService`：配乐步骤在拼接成功后、持久化前执行；配乐失败或超上限跳过均保留无配乐成片并完成合成，原因写入 `bgm_error_msg` 与任务流消息。
-- Flyway 迁移 `V1.1.1.2.0__add_episode_bgm_fields.sql` 新增 5 个字段；重新合成时统一重置。
+- Flyway 迁移 `V1.1.2.0.0__add_episode_bgm_fields.sql` 新增 4 个字段；重新合成时统一重置。
 
 ## 验证结果
 

@@ -12,6 +12,7 @@ import com.stonewu.fusion.service.storage.MediaStorageService;
 import com.stonewu.fusion.service.storyboard.dto.EpisodeBgmOutcome;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
@@ -79,6 +80,7 @@ public class EpisodeBgmService {
      * @return 启用的 platform=sonilo API 配置；没有则返回 null，表示本次合成不做配乐。
      *         同时存在多条时取 id 最小的一条并记录告警。
      */
+    @Cacheable(value = "episodeBgmConfig", key = "'enabled'", unless = "#result == null")
     public ApiConfig resolveApiConfig() {
         List<ApiConfig> configs = apiConfigService.getListByPlatform(SoniloAudioClient.PLATFORM);
         if (configs == null || configs.isEmpty()) {
@@ -111,6 +113,7 @@ public class EpisodeBgmService {
         if (musicSkipReason != null) {
             return EpisodeBgmOutcome.skipped(musicSkipReason);
         }
+        boolean hasOriginalAudio = hasAudioStream(composedVideo);
 
         progress.accept("配乐生成中：正在上传成片到 Sonilo…");
         String musicTaskId = soniloAudioClient.submitMusicTask(apiConfig, composedVideo, properties.getMusicPrompt());
@@ -125,6 +128,7 @@ public class EpisodeBgmService {
 
         Path sfxFile = null;
         String sfxStoredUrl = null;
+        String skippedReason = null;
         if (properties.isSfxEnabled()) {
             if (sfxAllowed(durationSeconds)) {
                 // 音效是可选加分项：失败只记录原因，保留已生成的配乐
@@ -140,18 +144,20 @@ public class EpisodeBgmService {
                 } catch (Exception e) {
                     sfxFile = null;
                     sfxStoredUrl = null;
+                    skippedReason = "音效生成失败：" + e.getMessage();
                     log.error("[EpisodeBgm] 音效生成失败，本次仅合入配乐", e);
                     progress.accept("音效生成失败：" + e.getMessage() + "，本次仅合入配乐");
                 }
             } else {
+                skippedReason = "本集时长超过音效上限 " + SFX_MAX_SECONDS / 60 + " 分钟，已跳过音效";
                 progress.accept("本集时长超过音效上限 " + SFX_MAX_SECONDS / 60 + " 分钟，本次仅生成配乐");
             }
         }
 
         progress.accept("配乐已生成，正在混入成片…");
         Path scoredVideo = workDir.resolve("output_bgm.mp4");
-        boolean hasOriginalAudio = hasAudioStream(composedVideo);
-        List<String> command = buildMixCommand(composedVideo, musicFile, sfxFile, hasOriginalAudio, scoredVideo);
+        List<String> command = buildMixCommand(
+                composedVideo, musicFile, sfxFile, hasOriginalAudio, durationSeconds, scoredVideo);
         if (!runFfmpeg(command)) {
             throw new BusinessException("配乐混音失败（ffmpeg），本集视频保持无配乐版本");
         }
@@ -161,14 +167,17 @@ public class EpisodeBgmService {
                 musicTaskId,
                 musicStoredUrl,
                 sfxStoredUrl,
-                null);
+                skippedReason);
     }
 
     /**
      * 配乐前置校验。返回非 null 表示跳过配乐的原因。
-     * 本地探测不到时长时交给后端强校验（超上限直接拒绝）。
+     * 无法确定视频时长时不提交付费生成任务。
      */
     String musicSkipReason(double durationSeconds) {
+        if (!Double.isFinite(durationSeconds) || durationSeconds <= 0) {
+            return "无法确定成片视频时长，已跳过配乐";
+        }
         if (durationSeconds > MUSIC_MAX_SECONDS) {
             return "本集时长超过配乐上限 " + MUSIC_MAX_SECONDS / 60 + " 分钟，已跳过配乐";
         }
@@ -182,11 +191,15 @@ public class EpisodeBgmService {
     /**
      * 构建混音命令。视频流一律 {@code -c:v copy} 零转码：
      * <ul>
-     * <li>成片无原声、只有配乐：直接映射配乐音轨</li>
-     * <li>其余情况：配乐先按配置降音量，再与原声 / 音效 amix 混合</li>
+     * <li>按视频流时长输出，短音轨补静音，长音轨裁剪</li>
+     * <li>配乐按配置调整音量，再与原声 / 音效混合</li>
      * </ul>
      */
-    List<String> buildMixCommand(Path video, Path music, Path sfx, boolean hasOriginalAudio, Path output) {
+    List<String> buildMixCommand(Path video, Path music, Path sfx, boolean hasOriginalAudio,
+                                 double durationSeconds, Path output) {
+        if (!Double.isFinite(durationSeconds) || durationSeconds <= 0) {
+            throw new BusinessException("混音必须提供有效的视频时长");
+        }
         List<String> command = new ArrayList<>();
         command.add(getFfmpegExecutable());
         command.add("-y");
@@ -200,10 +213,9 @@ public class EpisodeBgmService {
         }
 
         if (!hasOriginalAudio && sfx == null) {
-            command.add("-map");
-            command.add("0:v");
-            command.add("-map");
-            command.add("1:a");
+            command.add("-filter_complex");
+            command.add("[1:a]volume=" + String.format(Locale.ROOT, "%.2f", properties.getMusicVolume())
+                    + ",apad[aout]");
         } else {
             StringBuilder filter = new StringBuilder();
             filter.append("[1:a]volume=")
@@ -220,31 +232,33 @@ public class EpisodeBgmService {
                 mixInputs++;
             }
             filter.append("amix=inputs=").append(mixInputs)
-                    .append(":duration=first:normalize=0[aout]");
+                    .append(":duration=longest:normalize=0,apad[aout]");
             command.add("-filter_complex");
             command.add(filter.toString());
-            command.add("-map");
-            command.add("0:v");
-            command.add("-map");
-            command.add("[aout]");
         }
 
+        command.add("-map");
+        command.add("0:v:0");
+        command.add("-map");
+        command.add("[aout]");
         command.add("-c:v");
         command.add("copy");
         command.add("-c:a");
         command.add("aac");
-        command.add("-shortest");
+        command.add("-t");
+        command.add(String.format(Locale.ROOT, "%.3f", durationSeconds));
         command.add(output.toString());
         return command;
     }
 
     /**
-     * 尽力而为的本地时长探测。ffprobe 不可用或失败时返回 0，交给后端做最终校验。
+     * 读取视频流时长；探测失败时显式跳过可选配乐。
      */
     private double probeDurationSeconds(Path video) {
         List<String> command = List.of(
                 getFfprobeExecutable(), "-v", "error",
-                "-show_entries", "format=duration",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=duration",
                 "-of", "csv=p=0",
                 video.toString());
         String output = runForOutput(command, PROBE_TIMEOUT_SECONDS);
@@ -266,7 +280,8 @@ public class EpisodeBgmService {
                 "-of", "csv=p=0",
                 video.toString());
         String output = runForOutput(command, PROBE_TIMEOUT_SECONDS);
-        return output != null && StrUtil.isNotBlank(output.trim());
+        if (output == null) throw new BusinessException("无法检测成片原声，已停止配乐以保留原视频");
+        return StrUtil.isNotBlank(output.trim());
     }
 
     private boolean runFfmpeg(List<String> command) {
