@@ -128,6 +128,7 @@ interface SidebarSelection {
 }
 
 interface StoryboardSidebarProps {
+  projectId: number;
   storyboardId: number;
   selection: SidebarSelection;
   activeSceneId?: number | null;
@@ -150,6 +151,7 @@ interface StoryboardSidebarProps {
 
 export function StoryboardSidebar(props: StoryboardSidebarProps) {
   const {
+    projectId,
     storyboardId,
     selection,
     activeSceneId,
@@ -183,7 +185,11 @@ export function StoryboardSidebar(props: StoryboardSidebarProps) {
 
   // 监听 invalidation 自动强刷
   const storyboardsInvalidation = usePipelineStore((s) => s.invalidation.storyboards);
+  const hasRunningStoryboardPipeline = usePipelineStore((s) =>
+    s.tasks.some((task) => task.projectId === projectId && task.status === "running")
+  );
   const storyboardsInvRef = useRef(storyboardsInvalidation);
+  const pendingStoryboardRefreshRef = useRef(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -231,7 +237,10 @@ export function StoryboardSidebar(props: StoryboardSidebarProps) {
           })
         );
         setScenesMap(newScenesMap);
-        props.onInitialLoad?.(eps[0].id);
+        if (!isInitialLoadedRef.current) {
+          isInitialLoadedRef.current = true;
+          props.onInitialLoad?.(eps[0].id);
+        }
       } else {
         setScenesMap({});
       }
@@ -249,11 +258,16 @@ export function StoryboardSidebar(props: StoryboardSidebarProps) {
   }, [loadEpisodes]);
 
   useEffect(() => {
-    if (storyboardsInvRef.current !== storyboardsInvalidation) {
-      storyboardsInvRef.current = storyboardsInvalidation;
-      loadEpisodes();
-    }
-  }, [storyboardsInvalidation, loadEpisodes]);
+    if (storyboardsInvRef.current === storyboardsInvalidation) return;
+    storyboardsInvRef.current = storyboardsInvalidation;
+    pendingStoryboardRefreshRef.current = true;
+  }, [storyboardsInvalidation]);
+
+  useEffect(() => {
+    if (!pendingStoryboardRefreshRef.current || hasRunningStoryboardPipeline) return;
+    pendingStoryboardRefreshRef.current = false;
+    void loadEpisodes();
+  }, [hasRunningStoryboardPipeline, loadEpisodes]);
 
   // 加载某集下的场次
   const loadScenes = async (episodeId: number) => {

@@ -442,7 +442,6 @@ export function StoryboardFrameReferenceDialog({
               className="border-t-0 pt-0"
               onUpdateFrame={onUpdateFrame}
               onGenerateFrame={onGenerateFrame}
-              onGenerateSubmitted={onClose}
               onPreviewImage={handlePreviewImage}
             />
           </div>
