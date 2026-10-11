@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.HashMap;
 import java.util.Map;
 
 /** Applies explicit platform bindings to a deep copy of an immutable workflow version. */
@@ -29,6 +30,7 @@ public class ComfyUiWorkflowRenderer {
         ObjectNode workflow = documentService.parseApiWorkflow(version.getApiWorkflowJson()).deepCopy();
         List<ComfyUiInputBinding> bindings = documentService.parseInputBindings(
                 modelType, version.getApiWorkflowJson(), version.getInputBindingsJson());
+        Map<String, JsonNode> writtenInputs = new HashMap<>();
         for (ComfyUiInputBinding binding : bindings) {
             if (values == null || !values.containsKey(binding.businessField())) {
                 continue;
@@ -39,22 +41,31 @@ public class ComfyUiWorkflowRenderer {
             }
             Object selectedValue = selectIndexedValue(rawValue, binding);
             JsonNode renderedValue = convertValue(selectedValue, binding);
-            ObjectNode node = (ObjectNode) workflow.get(binding.nodeId());
-            ObjectNode nodeInputs = (ObjectNode) node.get("inputs");
+            String targetNodeId = binding.nodeId();
+            String targetInputName = binding.inputName();
+            ObjectNode nodeInputs = (ObjectNode) workflow.path(targetNodeId).path("inputs");
             JsonNode current = nodeInputs.get(binding.inputName());
             if (isUploadedMedia(binding.valueType()) && isLink(current)) {
-                // IMAGE 类输入需要张量而非文件名：目标输入当前是连线（如 LoadImage → 节点）时，
-                // 把上传文件名写到连线源节点的 image 输入，由 ComfyUI 加载成张量后经连线传入；
-                // 直接覆盖目标输入会把字符串塞进 IMAGE 输入导致 TypeError。
-                String sourceNodeId = current.get(0).asText();
-                ObjectNode sourceNode = (ObjectNode) workflow.get(sourceNodeId);
-                if (sourceNode != null && sourceNode.path("inputs").isObject()
-                        && sourceNode.path("inputs").has("image")) {
-                    ((ObjectNode) sourceNode.get("inputs")).set("image", renderedValue);
-                    continue;
+                JsonNode sourceNode = workflow.path(current.get(0).asText());
+                // 只支持内置 LoadImage 的 IMAGE 输出；其他链路必须明确绑定加载节点的文件字段。
+                if (!"uploaded_image".equals(binding.valueType())
+                        || current.get(1).asInt() != 0
+                        || !"LoadImage".equals(sourceNode.path("class_type").asText())
+                        || !sourceNode.path("inputs").path("image").isTextual()) {
+                    throw new BusinessException(400,
+                            "上传媒体请直接绑定加载节点的文件输入；图片连线仅支持 LoadImage 的 IMAGE 输出: "
+                                    + binding.nodeId() + "." + binding.inputName());
                 }
+                targetNodeId = current.get(0).asText();
+                targetInputName = "image";
+                nodeInputs = (ObjectNode) sourceNode.get("inputs");
             }
-            nodeInputs.set(binding.inputName(), renderedValue);
+            String targetKey = targetNodeId + "." + targetInputName;
+            JsonNode previous = writtenInputs.putIfAbsent(targetKey, renderedValue);
+            if (previous != null && !previous.equals(renderedValue)) {
+                throw new BusinessException(400, "多个媒体绑定不能覆盖同一个加载输入: " + targetKey);
+            }
+            nodeInputs.set(targetInputName, renderedValue);
         }
         return workflow;
     }
@@ -67,7 +78,7 @@ public class ComfyUiWorkflowRenderer {
 
     /** ComfyUI 连线格式：["源节点ID", 槽位索引]。 */
     private static boolean isLink(JsonNode value) {
-        return value != null && value.isArray() && value.size() >= 2
+        return value != null && value.isArray() && value.size() == 2
                 && value.get(0).isTextual() && value.get(1).isInt();
     }
 
