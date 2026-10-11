@@ -170,7 +170,12 @@ export default function StoryboardTabPage() {
 
   // 按场次分组数据
   const [sceneGroups, setSceneGroups] = useState<SceneWithItems[]>([]);
+  const sceneGroupsRef = useRef(sceneGroups);
   const [loadingScenes, setLoadingScenes] = useState(false);
+
+  useEffect(() => {
+    sceneGroupsRef.current = sceneGroups;
+  }, [sceneGroups]);
 
   // 当前选中集的合成状态
   const [currentEpisode, setCurrentEpisode] = useState<StoryboardEpisode | null>(null);
@@ -208,6 +213,9 @@ export default function StoryboardTabPage() {
   const [activeSceneId, setActiveSceneId] = useState<number | null>(null);
   // 标记是否由用户点击触发的滚动（此时不要通过 observer 覆盖）
   const isUserScrollRef = useRef(false);
+  // 当前页面主动发起的 Pipeline 由各自的完成回调局部更新，避免全局失效监听再次重建整棵分镜数据树。
+  const locallyManagedPipelineIdsRef = useRef(new Set<string>());
+  const locallyCompletedInvalidationSkipsRef = useRef(0);
 
   // ========== 派生数据 ==========
 
@@ -234,6 +242,63 @@ export default function StoryboardTabPage() {
       }
     }
   }, [sceneGroups]);
+
+  // 读取分镜和场次数据时保持当前工作区状态，避免后台任务完成后重置滚动位置。
+  const refreshStoryboardData = useCallback(async () => {
+    const scrollTop = scrollContainerRef.current?.scrollTop ?? null;
+
+    try {
+      void loadProjectAssets();
+      void refreshCurrentEpisode();
+
+      const loadedStoryboard = await storyboardApi.getByProject(projectId);
+      if (!loadedStoryboard) {
+        setStoryboard(null);
+        setScriptEpisodes([]);
+        setSceneGroups([]);
+        return;
+      }
+
+      setStoryboard(loadedStoryboard);
+      if (loadedStoryboard.scriptId) {
+        const episodes = await scriptApi.listEpisodes(loadedStoryboard.scriptId);
+        setScriptEpisodes(episodes);
+      } else {
+        setScriptEpisodes([]);
+      }
+
+      const selection = sidebarSelectionRef.current;
+      let scenes: StoryboardScene[];
+      if (selection.type === "episode" || selection.type === "scene") {
+        scenes = selection.episodeId
+          ? await storyboardApi.listScenesByEpisode(selection.episodeId)
+          : [];
+      } else {
+        scenes = await storyboardApi.listScenesByStoryboard(loadedStoryboard.id);
+      }
+
+      const groups = await Promise.all(
+        scenes.map(async (scene) => {
+          const items = await storyboardApi.listItemsByScene(scene.id);
+          return { scene, items };
+        })
+      );
+      setSceneGroups(groups);
+
+      if (scrollTop !== null) {
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => {
+            if (scrollContainerRef.current) {
+              scrollContainerRef.current.scrollTop = scrollTop;
+            }
+          });
+        });
+      }
+    } catch (err) {
+      console.error("完整刷新分镜页数据失败:", err);
+      toastApiError(err, "刷新分镜页数据失败");
+    }
+  }, [projectId, loadProjectAssets, refreshCurrentEpisode]);
 
   // 加载分镜
   const loadStoryboard = useCallback(async () => {
@@ -277,7 +342,8 @@ export default function StoryboardTabPage() {
       const scriptDisplayTitle =
         project?.name?.trim() || "未命名项目";
 
-      const pipelineId = addPipeline({
+      let pipelineId = "";
+      pipelineId = addPipeline({
         label: `AI 生成分镜 - ${scriptDisplayTitle}`,
         projectId,
         request: {
@@ -292,74 +358,29 @@ export default function StoryboardTabPage() {
           },
         },
         onComplete: () => {
-          loadStoryboard();
+          locallyManagedPipelineIdsRef.current.delete(pipelineId);
+          locallyCompletedInvalidationSkipsRef.current += 1;
+          void refreshStoryboardData();
         },
       });
+      locallyManagedPipelineIdsRef.current.add(pipelineId);
 
       setPanelExpanded(true);
       setExpandedTaskId(pipelineId);
-      await loadStoryboard();
     } catch (err) {
       console.error("启动分镜生成失败:", err);
       toastApiError(err, "启动分镜生成失败，请重试");
     }
   }, [
     addPipeline,
-    loadStoryboard,
+    alert,
     project?.name,
     projectId,
+    refreshStoryboardData,
     setExpandedTaskId,
     setPanelExpanded,
     storyboard,
   ]);
-
-  const refreshStoryboardData = useCallback(async () => {
-    try {
-      void loadProjectAssets();
-      void refreshCurrentEpisode();
-
-      const loadedStoryboard = await storyboardApi.getByProject(projectId);
-      let activeStoryboard = storyboard;
-      if (loadedStoryboard) {
-        activeStoryboard = loadedStoryboard;
-        setStoryboard(loadedStoryboard);
-        if (activeStoryboard.scriptId) {
-          const episodes = await scriptApi.listEpisodes(activeStoryboard.scriptId);
-          setScriptEpisodes(episodes);
-        } else {
-          setScriptEpisodes([]);
-        }
-      } else {
-        setStoryboard(null);
-        setScriptEpisodes([]);
-        setSceneGroups([]);
-        return;
-      }
-
-      const selection = sidebarSelectionRef.current;
-      let scenes: StoryboardScene[];
-      if (selection.type === "episode" || selection.type === "scene") {
-        if (selection.episodeId) {
-          scenes = await storyboardApi.listScenesByEpisode(selection.episodeId);
-        } else {
-          scenes = [];
-        }
-      } else {
-        scenes = await storyboardApi.listScenesByStoryboard(activeStoryboard.id);
-      }
-
-      const groups = await Promise.all(
-        scenes.map(async (scene) => {
-          const items = await storyboardApi.listItemsByScene(scene.id);
-          return { scene, items };
-        })
-      );
-      setSceneGroups(groups);
-    } catch (err) {
-      console.error("完整刷新分镜页数据失败:", err);
-      toastApiError(err, "刷新分镜页数据失败");
-    }
-  }, [projectId, storyboard, loadProjectAssets, refreshCurrentEpisode]);
 
   const handleManualRefreshStoryboard = useCallback(async () => {
     setIsRefreshingStoryboard(true);
@@ -397,7 +418,8 @@ export default function StoryboardTabPage() {
 
     try {
       await storyboardApi.clearEpisodeContent(episode.id);
-      const pipelineId = addPipeline({
+      let pipelineId = "";
+      pipelineId = addPipeline({
         label: `AI 分镜 · 第 ${displayNumber} 集`,
         projectId,
         request: {
@@ -414,9 +436,12 @@ export default function StoryboardTabPage() {
           },
         },
         onComplete: () => {
-          refreshStoryboardData();
+          locallyManagedPipelineIdsRef.current.delete(pipelineId);
+          locallyCompletedInvalidationSkipsRef.current += 1;
+          void refreshStoryboardData();
         },
       });
+      locallyManagedPipelineIdsRef.current.add(pipelineId);
 
       setPanelExpanded(true);
       setExpandedTaskId(pipelineId);
@@ -426,6 +451,8 @@ export default function StoryboardTabPage() {
     }
   }, [
     addPipeline,
+    alert,
+    confirm,
     projectId,
     refreshStoryboardData,
     scriptEpisodes,
@@ -434,28 +461,51 @@ export default function StoryboardTabPage() {
     storyboard,
   ]);
 
-  // AI 工具执行后自动刷新
-
-    const storyboardsInvalidation = usePipelineStore((s) => s.invalidation.storyboards);
+  // AI 工具执行后只在当前项目的任务全部结束时刷新一次。
+  // 工具流会为每个生成条目发送一次失效事件，不能在每个条目完成时重建整个页面。
+  const storyboardsInvalidation = usePipelineStore((s) => s.invalidation.storyboards);
+  const hasRunningStoryboardPipeline = usePipelineStore((s) =>
+    s.tasks.some((task) => task.projectId === projectId && task.status === "running")
+  );
   const storyboardsInvRef = useRef(storyboardsInvalidation);
+  const pendingStoryboardRefreshRef = useRef(false);
   useEffect(() => {
-    if (storyboardsInvRef.current !== storyboardsInvalidation) {
-      storyboardsInvRef.current = storyboardsInvalidation;
-      refreshStoryboardData();
+    if (storyboardsInvRef.current === storyboardsInvalidation) return;
+    storyboardsInvRef.current = storyboardsInvalidation;
+
+    const pipelineTasks = usePipelineStore.getState().tasks;
+    for (const pipelineId of locallyManagedPipelineIdsRef.current) {
+      const task = pipelineTasks.find((candidate) => candidate.id === pipelineId);
+      if (!task || task.status !== "running") {
+        locallyManagedPipelineIdsRef.current.delete(pipelineId);
+      }
     }
-  }, [storyboardsInvalidation, refreshStoryboardData]);
+    if (locallyCompletedInvalidationSkipsRef.current > 0) {
+      locallyCompletedInvalidationSkipsRef.current -= 1;
+      return;
+    }
+    if (locallyManagedPipelineIdsRef.current.size > 0) return;
+    pendingStoryboardRefreshRef.current = true;
+  }, [storyboardsInvalidation]);
+
+  useEffect(() => {
+    if (!pendingStoryboardRefreshRef.current || hasRunningStoryboardPipeline) return;
+    pendingStoryboardRefreshRef.current = false;
+    void refreshStoryboardData();
+  }, [hasRunningStoryboardPipeline, refreshStoryboardData]);
 
   // 加载场次分组数据
+  const storyboardId = storyboard?.id;
   const loadSceneGroups = useCallback(
     async (episodeId?: number) => {
-      if (!storyboard) return;
+      if (!storyboardId) return;
       setLoadingScenes(true);
       try {
         let scenes: StoryboardScene[];
         if (episodeId) {
           scenes = await storyboardApi.listScenesByEpisode(episodeId);
         } else {
-          scenes = await storyboardApi.listScenesByStoryboard(storyboard.id);
+          scenes = await storyboardApi.listScenesByStoryboard(storyboardId);
         }
 
         // 并行加载每个场次的条目
@@ -474,7 +524,7 @@ export default function StoryboardTabPage() {
         setLoadingScenes(false);
       }
     },
-    [storyboard]
+    [storyboardId]
   );
 
   // 追踪当前已加载的集ID，避免同集内切换场次重复加载
@@ -487,7 +537,7 @@ export default function StoryboardTabPage() {
 
   // 当侧边栏选择变化时加载数据
   useEffect(() => {
-    if (!storyboard) return;
+    if (!storyboardId) return;
 
     if (sidebarSelection.type === "all") {
       setActiveSceneId(null);
@@ -501,7 +551,7 @@ export default function StoryboardTabPage() {
       sidebarSelection.type === "scene" &&
       sidebarSelection.sceneId
     ) {
-      const sceneExists = sceneGroups.some(
+      const sceneExists = sceneGroupsRef.current.some(
         (g) => g.scene.id === sidebarSelection.sceneId
       );
       // 同一集且场次已存在于数据中：直接滚动
@@ -523,7 +573,7 @@ export default function StoryboardTabPage() {
         });
       }
     }
-  }, [sidebarSelection, storyboard, loadSceneGroups]);
+  }, [sidebarSelection, storyboardId, loadSceneGroups]);
 
   // 滚动到指定场次
   const scrollToScene = (sceneId: number) => {
@@ -745,6 +795,31 @@ export default function StoryboardTabPage() {
     );
   }, []);
 
+  const refreshStoryboardItems = useCallback(async (itemIds: number[]) => {
+    if (itemIds.length === 0) return;
+    try {
+      const updatedItems = await Promise.all(
+        itemIds.map((itemId) => storyboardApi.getItem(itemId))
+      );
+      const updates = new Map(updatedItems.map((item) => [item.id, item]));
+      setSceneGroups((prev) =>
+        prev.map((group) => {
+          let changed = false;
+          const items = group.items.map((item) => {
+            const updated = updates.get(item.id);
+            if (!updated) return item;
+            changed = true;
+            return updated;
+          });
+          return changed ? { ...group, items } : group;
+        })
+      );
+    } catch (err) {
+      console.error("更新生成后的分镜条目失败:", err);
+      toastApiError(err, "更新生成后的分镜条目失败");
+    }
+  }, []);
+
   /** 手动更新镜头首尾帧 */
   const handleUpdateItemFrame = useCallback(
     async (itemId: number, frameType: StoryboardFrameType, imageUrl: string | null) => {
@@ -773,7 +848,8 @@ export default function StoryboardTabPage() {
       const shotLabel = item.shotNumber || item.autoShotNumber || String(item.id);
       try {
         setNotificationOpen(true);
-        const pipelineId = addPipeline({
+        let pipelineId = "";
+        pipelineId = addPipeline({
           label: `生成镜头 ${shotLabel} ${frameLabel}`,
           projectId,
           request: {
@@ -790,9 +866,12 @@ export default function StoryboardTabPage() {
             },
           },
           onComplete: () => {
-            void refreshStoryboardData();
+            locallyManagedPipelineIdsRef.current.delete(pipelineId);
+            locallyCompletedInvalidationSkipsRef.current += 1;
+            void refreshStoryboardItems([item.id]);
           },
         });
+        locallyManagedPipelineIdsRef.current.add(pipelineId);
         setPanelExpanded(true);
         setExpandedTaskId(pipelineId);
       } catch (err) {
@@ -803,7 +882,7 @@ export default function StoryboardTabPage() {
     [
       addPipeline,
       projectId,
-      refreshStoryboardData,
+      refreshStoryboardItems,
       setExpandedTaskId,
       setNotificationOpen,
       setPanelExpanded,
@@ -866,7 +945,8 @@ export default function StoryboardTabPage() {
 
       for (const task of tasks) {
         const title = `批量生成${episodeLabel} ${sceneLabel}${task.frameLabel}`;
-        const pipelineId = addPipeline({
+        let pipelineId = "";
+        pipelineId = addPipeline({
           label: `${title} (${task.itemIds.length} 个镜头)`,
           projectId,
           request: {
@@ -879,13 +959,16 @@ export default function StoryboardTabPage() {
               selectedStoryboardItemIds: task.itemIds,
               storyboardId: storyboard.id,
               frameType: task.frameType,
-              framePrompt: task.framePrompt,
+                framePrompt: task.framePrompt,
+              },
             },
-          },
-          onComplete: () => {
-            void refreshStoryboardData();
-          },
-        });
+            onComplete: () => {
+              locallyManagedPipelineIdsRef.current.delete(pipelineId);
+              locallyCompletedInvalidationSkipsRef.current += 1;
+              void refreshStoryboardItems(task.itemIds);
+            },
+          });
+          locallyManagedPipelineIdsRef.current.add(pipelineId);
         firstPipelineId = firstPipelineId || pipelineId;
       }
 
@@ -897,9 +980,10 @@ export default function StoryboardTabPage() {
     },
     [
       addPipeline,
+      alert,
       currentEpisode,
       projectId,
-      refreshStoryboardData,
+      refreshStoryboardItems,
       sceneGroups,
       setExpandedTaskId,
       setNotificationOpen,
@@ -1069,6 +1153,7 @@ export default function StoryboardTabPage() {
       {/* 左栏：分镜目录 */}
       <motion.div variants={{ hidden: { opacity: 0, y: 16 }, visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] } } }} className="shrink-0 hidden xl:block">
       <StoryboardSidebar
+        projectId={projectId}
         onRefresh={handleManualRefreshStoryboard}
         isRefreshing={isRefreshingStoryboard}
         storyboardId={storyboard.id}
@@ -1142,7 +1227,8 @@ export default function StoryboardTabPage() {
               />
               <SheetContent side="left" className="w-[300px] p-0 border-r-0 flex flex-col pt-12">
                 <StoryboardSidebar
-        onRefresh={handleManualRefreshStoryboard}
+                  projectId={projectId}
+         onRefresh={handleManualRefreshStoryboard}
         isRefreshing={isRefreshingStoryboard}
         storyboardId={storyboard.id}
                   selection={sidebarSelection}
