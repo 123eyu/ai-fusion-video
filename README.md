@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>简体中文</strong> | <a href="README_EN.md">English</a>
+  <strong>简体中文</strong> | <a href="README_EN.md" target="_blank" rel="noopener noreferrer">English</a>
 </p>
 
 <h1 align="center">融光</h1>
@@ -11,8 +11,8 @@
 <p align="center">Agent 驱动的视频创作平台</p>
 
 <p align="center">
-  <a href="https://github.com/Stonewuu/ai-fusion-video/releases"><img src="https://img.shields.io/github/v/release/Stonewuu/ai-fusion-video?display_name=tag" alt="GitHub Release" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/Stonewuu/ai-fusion-video" alt="MIT License" /></a>
+  <a href="https://github.com/Stonewuu/ai-fusion-video/releases" target="_blank" rel="noopener noreferrer"><img src="https://img.shields.io/github/v/release/Stonewuu/ai-fusion-video?display_name=tag" alt="GitHub Release" /></a>
+  <a href="LICENSE" target="_blank" rel="noopener noreferrer"><img src="https://img.shields.io/github/license/Stonewuu/ai-fusion-video" alt="MIT License" /></a>
   <img src="https://img.shields.io/badge/Java-21-ED8B00" alt="Java 21" />
   <img src="https://img.shields.io/badge/Next.js-16-000000" alt="Next.js 16" />
 </p>
@@ -21,13 +21,35 @@
   <img src="https://stonewuu.github.io/Stonewuu/star-history/Stonewuu/ai-fusion-video.svg" alt="GitHub Star History" width="920" />
 </p>
 
-<table align="center" style="margin: 0 auto; display: table;">
-  <tr>
-    <td align="center">
-      <b>想让你的品牌出现在这里？<a href="mailto:me@stonewu.com">联系我</a></b>
-    </td>
-  </tr>
+## 🤝 赞助商
+
+感谢以下赞助商对融光的支持！
+
+<table width="100%">
+  <tbody>
+    <!-- 每位赞助商新增一条 tr：横幅独占整行，下方完整展示文案；联系入口统一保留在表格之后。 -->
+    <tr>
+      <td valign="top">
+        <p align="center">
+          <a href="https://www.infistar.cc/register?aff=KRJVKLFP&amp;ref_source=link" target="_blank" rel="noopener noreferrer">
+            <img src="assets/sponsors/infistar-banner.png" alt="Infistar.cc 无限星河：一站式全球大模型 API 服务平台" width="920" />
+          </a>
+        </p>
+        <p><strong>感谢 <a href="https://www.infistar.cc/register?aff=KRJVKLFP&amp;ref_source=link" target="_blank" rel="noopener noreferrer">Infistar.cc 无限星河</a> 赞助本项目！ | 全模型 API · 为 AI 视频创作注入强劲算力</strong></p>
+        <p>
+          🔥 <strong>稳定低价</strong>：低至官方 <strong>0.1 折起</strong>，倍率公开透明；多节点冗余智能路由，彻底抗 429 频控熔断；<br />
+          🎬 <strong>全模型一站通</strong>：单 Key 汇聚 Claude、GPT、Gemini、DeepSeek 等顶尖模型，轻松搞定剧本拆解与分镜推导；<br />
+          🤖 <strong>Agent 创作赋能</strong>：高并发低延迟，深度支撑“融光助手”及多步骤 Agent 任务的长时挂机与连续生成；<br />
+          🎁 <strong>专属开箱福利</strong>：通过 <a href="https://www.infistar.cc/register?aff=KRJVKLFP&amp;ref_source=link" target="_blank" rel="noopener noreferrer">专属推广链接</a> 注册即赠 <strong>$5 测试额度</strong> 与<strong>首充专享特惠</strong>！
+        </p>
+      </td>
+    </tr>
+  </tbody>
 </table>
+
+<p align="center">
+  <strong>想让你的品牌出现在这里？ <a href="mailto:me@stonewu.com" target="_blank" rel="noopener noreferrer">联系我</a></strong>
+</p>
 
 <table align="center">
   <thead>
@@ -362,5 +384,5 @@ Flyway 迁移脚本位于 `ai-fusion-video/src/main/resources/db/migration/`。�
 [MIT License](LICENSE)
 
 <p align="center">
-  <sub>Built by <a href="https://github.com/Stonewuu">Stonewu</a></sub>
+  <sub>Built by <a href="https://github.com/Stonewuu" target="_blank" rel="noopener noreferrer">Stonewu</a></sub>
 </p>

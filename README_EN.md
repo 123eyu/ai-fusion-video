@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="README.md">简体中文</a> | <strong>English</strong>
+  <a href="README.md" target="_blank" rel="noopener noreferrer">简体中文</a> | <strong>English</strong>
 </p>
 
 <h1 align="center">AI Fusion Video</h1>
@@ -11,8 +11,8 @@
 <p align="center">An Agent-driven video creation platform</p>
 
 <p align="center">
-  <a href="https://github.com/Stonewuu/ai-fusion-video/releases"><img src="https://img.shields.io/github/v/release/Stonewuu/ai-fusion-video?display_name=tag" alt="GitHub Release" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/Stonewuu/ai-fusion-video" alt="MIT License" /></a>
+  <a href="https://github.com/Stonewuu/ai-fusion-video/releases" target="_blank" rel="noopener noreferrer"><img src="https://img.shields.io/github/v/release/Stonewuu/ai-fusion-video?display_name=tag" alt="GitHub Release" /></a>
+  <a href="LICENSE" target="_blank" rel="noopener noreferrer"><img src="https://img.shields.io/github/license/Stonewuu/ai-fusion-video" alt="MIT License" /></a>
   <img src="https://img.shields.io/badge/Java-21-ED8B00" alt="Java 21" />
   <img src="https://img.shields.io/badge/Next.js-16-000000" alt="Next.js 16" />
 </p>
@@ -21,13 +21,35 @@
   <img src="https://stonewuu.github.io/Stonewuu/star-history/Stonewuu/ai-fusion-video.svg" alt="GitHub Star History" width="920" />
 </p>
 
-<table align="center" style="margin: 0 auto; display: table;">
-  <tr>
-    <td align="center">
-      <b>Want to feature your brand here? <a href="mailto:me@stonewu.com">Contact me</a></b>
-    </td>
-  </tr>
+## 🤝 Sponsors
+
+Thank you to the following sponsors for supporting AI Fusion Video!
+
+<table width="100%">
+  <tbody>
+    <!-- Add one tr per sponsor: a full-width banner with the complete description below; keep the contact link after the table. -->
+    <tr>
+      <td valign="top">
+        <p align="center">
+          <a href="https://www.infistar.cc/register?aff=KRJVKLFP&amp;ref_source=link" target="_blank" rel="noopener noreferrer">
+            <img src="assets/sponsors/infistar-banner.png" alt="Infistar.cc: a one-stop API platform for leading AI models worldwide" width="920" />
+          </a>
+        </p>
+        <p><strong>Thank you to <a href="https://www.infistar.cc/register?aff=KRJVKLFP&amp;ref_source=link" target="_blank" rel="noopener noreferrer">Infistar.cc (无限星河)</a> for sponsoring this project! | All-model API access · Powering AI video creation</strong></p>
+        <p>
+          🔥 <strong>Reliable service at low prices</strong>: Rates as low as <strong>1% of official pricing</strong>, with transparent pricing multipliers; redundant nodes and intelligent routing protect against HTTP 429 rate limits and circuit-breaker events;<br />
+          🎬 <strong>Leading models in one place</strong>: Access Claude, GPT, Gemini, DeepSeek, and more with a single API key for script breakdown and storyboard planning;<br />
+          🤖 <strong>Built for Agent workflows</strong>: High concurrency and low latency support long-running, unattended sessions and continuous generation in the AI Fusion Video assistant and multi-step Agent tasks;<br />
+          🎁 <strong>Exclusive welcome offer</strong>: Sign up through the <a href="https://www.infistar.cc/register?aff=KRJVKLFP&amp;ref_source=link" target="_blank" rel="noopener noreferrer">exclusive referral link</a> to receive <strong>$5 in trial credits</strong> and a <strong>special offer on your first top-up</strong>!
+        </p>
+      </td>
+    </tr>
+  </tbody>
 </table>
+
+<p align="center">
+  <strong>Want to feature your brand here? <a href="mailto:me@stonewu.com" target="_blank" rel="noopener noreferrer">Contact me</a></strong>
+</p>
 
 <table align="center">
   <thead>
@@ -41,9 +63,15 @@
     <tr>
       <td align="center" width="33%">
         <img src="https://image.stonewu.com/file/wechat-qrcode.png" alt="Author WeChat QR code" width="220" />
+        <p align="center">
+          <b style="color:red"> Please include a note with your friend request; requests without a note will not be accepted. </b>
+        </p>
       </td>
       <td align="center" width="33%">
         <img src="https://image.stonewu.com/file/ai-fusion-video-qrcode-group.png" alt="Community group QR code" width="220" />
+        <p align="center">
+          <b>Group 1 is full with 500 members. Please join Group 2.</b>
+        </p>
       </td>
       <td align="center" width="33%">
         <img src="https://image.stonewu.com/file/alipay_qrcode.png" alt="Donation QR code" width="220" />
@@ -52,9 +80,9 @@
   </tbody>
 </table>
 
-<p align="center">
+<!-- <p align="center">
   <sub><b>WeChat disables QR-code invitations once a group has more than 200 members. To join, add the author on WeChat and mention "Rongguang (融光)" in your request.</b></sub>
-</p>
+</p> -->
 
 <hr/>
 
@@ -94,6 +122,8 @@ Media assets can be stored on local disk or in an S3-compatible object store. Ag
 ## UI demos
 
 https://github.com/user-attachments/assets/fe71cbb8-f9d9-4351-9a4c-cb8a0a6af7ba
+
+https://github.com/user-attachments/assets/24d9443b-e463-405c-8ada-108236b4d6c2
 
 https://github.com/user-attachments/assets/2f1de26c-5cd5-4be3-ad2e-81be2edd6956
 
@@ -354,5 +384,5 @@ Before submitting, make sure the change has a clear scope and does not include s
 [MIT License](LICENSE)
 
 <p align="center">
-  <sub>Built by <a href="https://github.com/Stonewuu">Stonewu</a></sub>
+  <sub>Built by <a href="https://github.com/Stonewuu" target="_blank" rel="noopener noreferrer">Stonewu</a></sub>
 </p>
